@@ -1,0 +1,22 @@
+analyte_id,analyte_name,analyte_desc,Analyte_Code,Detection_limit
+Analyte_id : 1,"Aggregate Stability, 0.5-2mm Aggregates",Aggregate stability is the weight percent of 0.5mm - 2mm aggregates remaining after wet sieving.,3F1a1a,No detection limit
+Analyte_id : 5,"Bulk Density, <2mm Fraction, Ovendry","Bulk density, oven dry (105 C) is the weight per unit volume of the <2 mm fraction, with volume measured on oven dry (105 C) natural fabric (clods). It is reported as grams per cubic centimeter on a <2 mm base.",3B1c,No detection limit
+Analyte_id : 54,"Carbonate, <2mm Fraction","Carbonate in the < 2mm fraction is measured by CO2 evolution after acid treatment. It is reported as gravimetric percent CaCO3 on a <2 mm base, even though carbonates of Mg, Na, K, and Fe may be present and react with the acid.",4E1a1a1a1,0.5
+Analyte_id : 622,"Carbon, Total","Total carbon is a measure of all organic and inorganic nitrogen, including that found in organic minerals.",4H2a1,0.02
+Analyte_id : 623,"Nitrogen, Total","Total nitrogen is a measure of all organic and inorganic nitrogen, including that found in nitrogen minerals.",4H2a1,0.02
+Analyte_id : 268,"pH, 1:1 Soil-Water Suspension","The pH, 1:1 soil-water suspension is the pH of a sample measured in distilled water at a 1:1 soil:solution ratio. If wider ratios increase the pH, salts are indicated.",4C1a2a1,No detection limit
+Analyte_id : 270,"Phosphorus, Bray-1 Extractable","This is the phosphorus extractable by the Bray-1 method, reported as milligrams per kilogram on a <2 mm base. It is used as an index of plant-available phosphorus. Bray-1 extracts adsorbed P.",4D3a1,No detection limit
+Analyte_id : 274,"Phosphorus, Olsen Extractable",The Olsen extractable phosphorus is used as an indicator of available phosphorus in calcareous soil materials (pH >6).,4D5a1,0.7
+Analyte_id : 334,Clay,Total clay is the soil separate with <0.002 mm particle diameter. Clay size carbonate is included. Total clay is reported as a weight percent of the <2 mm fraction.,3A1a1,No detection limit
+Analyte_id : 364,"Electrical Conductivity, Predict, 1:2 (w/w)","The salt predict electrical conductivity is used to determine whether additional salt analyses are needed, and to estimate appropriate dilution ratios for additional tests. It is reported as mmhos per centimeter of a 1:2 soil:water mixture by weight.",4F1a,No detection limit
+Analyte_id : 624,"Sulfur, Total","Total sulfur is a measure of all organic and inorganic sulfur, including that found in sulfide minerals.",4H2a3,0.02
+Analyte_id : 652,"Phosphorus, Mehlich3 Extractable",The phosphorus extracted by the Mehlich III solution.,4D6a1,0.6
+Analyte_id : 660,"Corrected Gypsum, <2mm",Corrected Gypsum ( Uncorrected Gypsum * Factor),4E2a1a,0.2
+Analyte_id : 723,"CEC, NH4OAc, pH 7.0, 2M KCl displacement","CEC by NH4OAC is the cation exchange capacity of the sample, determined by 1N NH4OAC in a system highly buffered at pH 7.0 The NH4 is displaced by 2M KCl to obtain a solution without solids. It is reported as meq per 100 grams sample, on a <2 mm base.",4B1a1a2a1,0.5
+Analyte_id : 725,"Potassium, NH4OAc Extractable, 2M KCl displacement",NH4OAC extractable potassium is the fraction removed by pH 7.0 NH4OAC. It is assumed to represent the exchangeable K. It is reported as meq per 100 grams on a <2 mm base.,4B1a1c1,0.3
+Analyte_id : 1408,"Carbon, hpom",The carbon content of the particulate organic matter (>53 micron),6A4a1a1-3a1,0.02
+Calc_id : 60,"Sand, Total",Total sand is the soil separate with 0.05 to 2.0 mm particle diameter. It is reported a gravimetric percent on a <2 mm base.,3A1a1,No detection limit
+Calc_id : 62,"Silt, Total",Total silt is the soil separate with 0.002 to 0.05 mm particle size. It is reported as a gravimetric percent on a <2 mm base.,3A1a1,No detection limit
+Calc_id : 729,"Estimated Organic Carbon, Total C, S prep","Estimated Organic Carbon based on Total C, S prep.
+The difference between total carbon (method 4H2a1 ) and inorganic C is an estimate of the organic C. The inorganic C should be approximately equivalent to carbonate values measured by CO2 evolution with strong acid (Method 4E1a1a1)",,0.02
+Calc_id : 934,"Carbon, hmin, S Prep",The carbon content of the less than 53 micron fraction.,6A4a1a1-3a3,0.02

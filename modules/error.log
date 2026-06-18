@@ -1,0 +1,13 @@
+2026-03-11 19:25:20.953586 - ERROR: Error in count_negative_values_in_zip("C:/Users/ellio/Desktop/vertex.zip") : 
+  Zip file not found: C:/Users/ellio/Desktop/vertex.zip
+
+2026-03-11 19:50:26.966262 - ERROR: Error in count_negative_rows_in_aggregated_csv("C:/Users/ellio/Onedrive/Downloads/preprocess_2026-03-11/processed_data.csv") : 
+  CSV file not found: C:/Users/ellio/Onedrive/Downloads/preprocess_2026-03-11/processed_data.csv
+
+2026-03-11 19:50:37.929907 - ERROR: Error in count_negative_rows_in_aggregated_csv("C:/Users/ellio/Onedrive/Downloads/preprocessed_2026-03-11/processed_data.csv") : 
+  CSV file not found: C:/Users/ellio/Onedrive/Downloads/preprocessed_2026-03-11/processed_data.csv
+
+2026-03-11 19:52:32.67854 - ERROR: Error in file(file, "rt") : cannot open the connection
+
+2026-03-11 19:54:42.874296 - ERROR: Error in file(file, "rt") : cannot open the connection
+

@@ -1,0 +1,4 @@
+dsh_footer              Insert DSH themed footer in a shiny app
+dsh_header              Insert DSH themed header in a shiny app
+theme_dsh               ggplot2 theme for visualizations in DSH
+                        applications

@@ -1,0 +1,21 @@
+Package: shiny.commons
+Title: Commons helper functions for the USDA Dynamic Soils Hub (DSH)
+Version: 0.0.0.9000
+Authors@R: 
+    person("Jesse", "Fleri", , "jesse.fleri@usda.gov", role = c("aut", "cre"),
+           comment = c(ORCID = "0000-0002-3824-9915"))
+Description: This package is designed to create a standard set of 508 compliant
+    shiny components and visualizations. It should be considered a critical
+    dependency of all R Shiny builds within the DSH.  
+License: GPL (>= 3)
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.2
+Imports: ggplot2, shiny, tidyr
+Suggests: testthat (>= 3.0.0)
+Config/testthat/edition: 3
+NeedsCompilation: no
+Packaged: 2025-03-06 19:27:55 UTC; Jesse.Fleri
+Author: Jesse Fleri [aut, cre] (<https://orcid.org/0000-0002-3824-9915>)
+Maintainer: Jesse Fleri <jesse.fleri@usda.gov>
+Built: R 4.4.2; ; 2025-03-06 19:27:56 UTC; windows
