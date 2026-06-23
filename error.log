@@ -1,0 +1,3 @@
+2026-06-21 14:31:19.181292 - ERROR: Error in library(DiagrammeR) : there is no package called ‘DiagrammeR’
+Calls: <Anonymous> ... lapply -> FUN -> withVisible -> eval -> eval -> library
+
