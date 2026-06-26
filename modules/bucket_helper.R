@@ -1,5 +1,3 @@
-# bucket_helper.R
-
 library(aws.s3)
 library(readr)
 
@@ -11,23 +9,12 @@ s3_opts <- function() {
   list(
     key = Sys.getenv("AWS_ACCESS_KEY_ID"),
     secret = Sys.getenv("AWS_SECRET_ACCESS_KEY"),
-    
-    # IMPORTANT:
-    # leave region blank so aws.s3 does not build s3-<region>.amazonaws.com
-    region = "",
-    
-    # IMPORTANT:
-    # force Railway endpoint directly
-    base_url = "storage.railway.app",
-    
+    region = Sys.getenv("AWS_DEFAULT_REGION"),
+    base_url = sub("^https?://", "", Sys.getenv("AWS_ENDPOINT_URL")),
     use_https = TRUE,
     url_style = Sys.getenv("S3_URL_STYLE", unset = "virtual"),
     check_region = FALSE
   )
-}
-
-s3_call <- function(fun, ...) {
-  do.call(fun, c(list(...), s3_opts()))
 }
 
 bucket_key <- function(...) {
@@ -37,11 +24,17 @@ bucket_key <- function(...) {
 }
 
 list_bucket_keys <- function(prefix = "") {
-  objs <- s3_call(
-    aws.s3::get_bucket,
+  objs <- aws.s3::get_bucket(
     bucket = bucket_name(),
     prefix = prefix,
-    max = Inf
+    max = Inf,
+    key = s3_opts()$key,
+    secret = s3_opts()$secret,
+    region = s3_opts()$region,
+    base_url = s3_opts()$base_url,
+    use_https = s3_opts()$use_https,
+    url_style = s3_opts()$url_style,
+    check_region = s3_opts()$check_region
   )
   
   if (length(objs) == 0) return(character(0))
@@ -60,59 +53,89 @@ bucket_object_exists <- function(object_key) {
 }
 
 read_bucket_delim <- function(object_key, delim = ",") {
-  s3_call(
-    aws.s3::s3read_using,
+  aws.s3::s3read_using(
     FUN = readr::read_delim,
     object = object_key,
     bucket = bucket_name(),
+    opts = s3_opts(),
     delim = delim,
     show_col_types = FALSE
   )
 }
 
 read_bucket_rds <- function(object_key) {
-  s3_call(
-    aws.s3::s3readRDS,
+  aws.s3::s3readRDS(
     object = object_key,
-    bucket = bucket_name()
+    bucket = bucket_name(),
+    key = s3_opts()$key,
+    secret = s3_opts()$secret,
+    region = s3_opts()$region,
+    base_url = s3_opts()$base_url,
+    use_https = s3_opts()$use_https,
+    url_style = s3_opts()$url_style,
+    check_region = s3_opts()$check_region
   )
 }
 
 write_bucket_rds <- function(x, object_key) {
-  s3_call(
-    aws.s3::s3saveRDS,
+  aws.s3::s3saveRDS(
     x = x,
     object = object_key,
-    bucket = bucket_name()
+    bucket = bucket_name(),
+    key = s3_opts()$key,
+    secret = s3_opts()$secret,
+    region = s3_opts()$region,
+    base_url = s3_opts()$base_url,
+    use_https = s3_opts()$use_https,
+    url_style = s3_opts()$url_style,
+    check_region = s3_opts()$check_region
   )
 }
 
 download_bucket_file <- function(object_key, local_file) {
-  s3_call(
-    aws.s3::save_object,
+  aws.s3::save_object(
     object = object_key,
     bucket = bucket_name(),
-    file = local_file
+    file = local_file,
+    key = s3_opts()$key,
+    secret = s3_opts()$secret,
+    region = s3_opts()$region,
+    base_url = s3_opts()$base_url,
+    use_https = s3_opts()$use_https,
+    url_style = s3_opts()$url_style,
+    check_region = s3_opts()$check_region
   )
 }
 
 upload_bucket_file <- function(local_file, object_key) {
-  s3_call(
-    aws.s3::put_object,
+  aws.s3::put_object(
     file = local_file,
     object = object_key,
-    bucket = bucket_name()
+    bucket = bucket_name(),
+    key = s3_opts()$key,
+    secret = s3_opts()$secret,
+    region = s3_opts()$region,
+    base_url = s3_opts()$base_url,
+    use_https = s3_opts()$use_https,
+    url_style = s3_opts()$url_style,
+    check_region = s3_opts()$check_region
   )
 }
 
 download_bucket_temp <- function(object_key, ext = "") {
   tmp <- tempfile(fileext = ext)
   
-  s3_call(
-    aws.s3::save_object,
+  aws.s3::save_object(
     object = object_key,
     bucket = bucket_name(),
-    file = tmp
+    file = tmp,
+    key = s3_opts()$key,
+    secret = s3_opts()$secret,
+    region = s3_opts()$region,
+    base_url = s3_opts()$base_url,
+    use_https = s3_opts()$use_https,
+    url_style = s3_opts()$url_style,
+    check_region = s3_opts()$check_region
   )
   
   tmp
