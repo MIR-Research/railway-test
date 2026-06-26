@@ -4,15 +4,15 @@ library(aws.s3)
 library(readr)
 
 bucket_name <- function() {
-  Sys.getenv("BUCKET_NAME", unset = Sys.getenv("BUCKET"))
+  Sys.getenv("AWS_S3_BUCKET_NAME")
 }
 
 s3_opts <- function() {
   list(
-    key = Sys.getenv("AWS_ACCESS_KEY_ID", unset = Sys.getenv("ACCESS_KEY_ID")),
-    secret = Sys.getenv("AWS_SECRET_ACCESS_KEY", unset = Sys.getenv("SECRET_ACCESS_KEY")),
-    region = Sys.getenv("AWS_REGION", unset = Sys.getenv("REGION", unset = "auto")),
-    base_url = sub("^https?://", "", Sys.getenv("AWS_S3_ENDPOINT", unset = Sys.getenv("ENDPOINT"))),
+    key = Sys.getenv("AWS_ACCESS_KEY_ID"),
+    secret = Sys.getenv("AWS_SECRET_ACCESS_KEY"),
+    region = Sys.getenv("AWS_DEFAULT_REGION", unset = "auto"),
+    base_url = sub("^https?://", "", Sys.getenv("AWS_ENDPOINT_URL")),
     url_style = Sys.getenv("S3_URL_STYLE", unset = "virtual"),
     check_region = FALSE
   )
