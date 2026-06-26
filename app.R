@@ -52,13 +52,11 @@ fs_cache <- cache_filesystem(cache_dir)
 
 # Create a memoized function for loading and processing map data
 load_map_data_memo <- memoise(function(property) {
-  infile <- switch(
+  object_key <- switch(
     property,
     # "AS" = "Full_DFs/AS.txt",
     # "BD" = "Full_DFs/BD.txt",
-    # "C_pom_mineral" = "Full_DFs/C_pom_mineral.txt",
     "C_hpom" = "Full_DFs/C_hpom.txt",
-    # "C_pom" = "Full_DFs/C_pom.txt",
     # "Carbonate" = "Full_DFs/Carbonate.txt",
     # "CEC" = "Full_DFs/CEC.txt",
     # "Gypsum" = "Full_DFs/Gypsum.txt",
@@ -76,25 +74,25 @@ load_map_data_memo <- memoise(function(property) {
     # "EC" = "Full_DFs/EC.txt",
     # "ESOC" = "Full_DFs/ESOC.txt",
     # "Carbon_hmin" = "Full_DFs/Carbon_hmin.txt",
-    # "SOC" = "Full_DFs/SOC.txt",
     NULL
   )
   
-  if (is.null(infile) || !file.exists(infile)) {
-    # Return NULL if no file or file not found
-    return(NULL)
-  }
+  if (is.null(object_key)) return(NULL)
   
-  df <- read_delim(infile, delim = ",")
+  df <- tryCatch(
+    read_bucket_delim(object_key, delim = ","),
+    error = function(e) {
+      message("Bucket read failed for: ", object_key, " | ", e$message)
+      NULL
+    }
+  )
   
-  # Filter rows with complete coordinates
-  df <- df[complete.cases(df[, c('latitude_std_decimal_degrees', 'longitude_std_decimal_degrees')]), ]
+  if (is.null(df)) return(NULL)
   
-  # Get unique site IDs to reduce clutter
-  unique_df <- df %>%
-    distinct(lims_site_id, .keep_all = TRUE)
+  df <- df[complete.cases(df[, c("latitude_std_decimal_degrees",
+                                 "longitude_std_decimal_degrees")]), ]
   
-  unique_df
+  dplyr::distinct(df, lims_site_id, .keep_all = TRUE)
 }, cache = fs_cache)
 
 # Source module files
@@ -129,13 +127,11 @@ soilProperties <- list(
 )
 
 load_spectral_data_memo <- memoise(function(property) {
-  infile <- switch(
+  object_key <- switch(
     property,
     # "AS" = "spectral_data/AS.txt",
     # "BD" = "spectral_data/BD.txt",
-    # "C_pom_mineral" = "spectral_data/C_pom_mineral.txt",
     "C_hpom" = "spectral_data/C_hpom.txt",
-    # "C_pom" = "spectral_data/C_pom.txt",
     # "Carbonate" = "spectral_data/Carbonate.txt",
     # "CEC" = "spectral_data/CEC.txt",
     # "Gypsum" = "spectral_data/Gypsum.txt",
@@ -153,17 +149,18 @@ load_spectral_data_memo <- memoise(function(property) {
     # "EC" = "spectral_data/EC.txt",
     # "ESOC" = "spectral_data/ESOC.txt",
     # "Carbon_hmin" = "spectral_data/Carbon_hmin.txt",
-    # "SOC" = "spectral_data/SOC.txt",
     NULL
   )
   
-  if (!is.null(infile) && file.exists(infile)) {
-    data <- read_delim(infile, delim = ",")
-    return(data)
-  } else {
-    print("no data found")
-    return(NULL)
-  }
+  if (is.null(object_key)) return(NULL)
+  
+  tryCatch(
+    read_bucket_delim(object_key, delim = ","),
+    error = function(e) {
+      message("Bucket read failed for: ", object_key, " | ", e$message)
+      NULL
+    }
+  )
 }, cache = fs_cache)
 
 ui <- fluidPage(
