@@ -113,7 +113,7 @@ soilProperties <- list(
   # "Carbon (hmin)"            = "Carbon_hmin",
   # "Organic Carbon" = "SOC",
   # "Carbon (pom)" = "C_pom",
-  "Carbon (hpom)"            = "C_hpom",
+  "Carbon (hpom)"            = "C_hpom"
   # "Carbon (pom mineral)" = "C_pom_mineral",
   # "Total Nitrogen"           = "TN",
   # "Phosphorus (Olsen)"       = "P_Olsen",
