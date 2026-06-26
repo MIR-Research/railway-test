@@ -183,111 +183,96 @@ modelSelectionServer <- function(id, shared, soilPropertyName) {
     })
     
     # Reactive expressions for model paths based on selected mlModel
-    model_paths <- reactive({
+    model_prefixes <- reactive({
       req(shared$modelType, shared$mlModel)
-      base_path <- switch(shared$modelType,
-                          "global" = "models/Global",
-                          "texture" = "models/Texture_classes",
-                          "order" = "models/Orders",
-                          "depth" = "models/Depths",
-                          "lulc" = "models/LULC",
-                          "mlra" = "models/MLRA")
-      model_folder <- shared$mlModel
-      file.path(base_path, model_folder)
+      
+      base_prefix <- switch(shared$modelType,
+                            "global" = "models/Global",
+                            "texture" = "models/Texture_classes",
+                            "order" = "models/Orders",
+                            "depth" = "models/Depths",
+                            "lulc" = "models/LULC",
+                            "mlra" = "models/MLRA")
+      
+      bucket_key(base_prefix, shared$mlModel)
     })
     
     # Reactive expressions for model choices
     model_choices <- reactive({
-      req(active())  
+      req(active())
       req(shared$mlModel, shared$modelType)
-      path <- model_paths()
       
-      if (!is.null(path) && dir.exists(path)) {
-        
-        depth_order <- depth_list                          # "15cm" … "200cm" (already ascending)
-        
-        if (shared$mlModel != "CNN") {                     # ---------- non-CNN ----------
-          files <- list.files(path, pattern = "\\.rds$", full.names = FALSE)
-          files <- files[!grepl("_pca\\.rds$", files)]
-          files <- files[grepl(id, files)]
-          
-          if (length(files) == 0) {
-            showNotification("No models found", type = "warning")
-            return(NULL)
-          }
-          
-          pattern_list <- switch(shared$modelType,
-                                 "global"  = NULL,
-                                 "texture" = texture_list,
-                                 "order"   = order_list,
-                                 "depth"   = depth_list,
-                                 "lulc"    = LULC_list,
-                                 "mlra"    = MLRA_list)
-          
-          adjust_name <- function(file) {
-            if (!is.null(pattern_list)) {
-              for (pat in names(pattern_list)) {
-                if (grepl(pat, file, ignore.case = TRUE))
-                  return(pattern_list[[pat]])
-              }
-            }
-            tools::file_path_sans_ext(file)     # fall-back
-          }
-          
-          adjusted <- sapply(files, adjust_name)
-          choices  <- setNames(files, adjusted)
-          
-          ## ---------- depth specific tidy-up ----------
-          if (shared$modelType == "depth") {
-            # 1. drop anything that was **not** mapped by depth_list  (e.g., 250 cm)
-            choices <- choices[names(choices) %in% depth_order]
-            
-            # 2. reorder to 15 → 30 → 60 → 100 → 200
-            choices <- choices[match(depth_order, names(choices))]
-          }
-          return(choices)
-          
-        } else {                                           # ----------  CNN ----------
-          files <- list.files(path, pattern = "\\.keras$", full.names = FALSE)
-          files <- files[grepl(id, files)]
-          
-          if (length(files) == 0) {
-            showNotification("No models found", type = "warning")
-            return(NULL)
-          }
-          
-          pattern_list <- switch(shared$modelType,
-                                 "global"  = NULL,
-                                 "texture" = texture_list,
-                                 "order"   = order_list,
-                                 "depth"   = depth_list,
-                                 "lulc"    = LULC_list,
-                                 "mlra"    = MLRA_list)
-          
-          adjust_name <- function(file) {
-            if (!is.null(pattern_list)) {
-              for (pat in names(pattern_list)) {
-                if (grepl(pat, file, ignore.case = TRUE))
-                  return(pattern_list[[pat]])
-              }
-            }
-            tools::file_path_sans_ext(file)
-          }
-          
-          adjusted <- sapply(files, adjust_name)
-          choices  <- setNames(files, adjusted)
-          
-          ## depth clean-up (same idea as above)
-          if (shared$modelType == "depth") {
-            choices <- choices[names(choices) %in% depth_order]
-            choices <- choices[match(depth_order, names(choices))]
-          }
-          return(choices)
+      prefix <- model_prefixes()
+      depth_order <- unname(depth_list)
+      
+      keys <- tryCatch(
+        list_model_keys(prefix),
+        error = function(e) {
+          showNotification(
+            paste("Error listing models from bucket:", e$message),
+            type = "error"
+          )
+          return(character(0))
         }
-      } else {
-        showNotification("Model path does not exist", type = "warning")
-        NULL
+      )
+      
+      if (length(keys) == 0) {
+        showNotification("No models found in bucket", type = "warning")
+        return(NULL)
       }
+      
+      files <- basename(keys)
+      
+      if (shared$mlModel != "CNN") {
+        keep <- grepl("\\.rds$", files, ignore.case = TRUE) &
+          !grepl("_pca\\.rds$", files, ignore.case = TRUE) &
+          grepl(id, files, ignore.case = TRUE)
+      } else {
+        keep <- grepl("\\.keras$", files, ignore.case = TRUE) &
+          grepl(id, files, ignore.case = TRUE)
+      }
+      
+      keys <- keys[keep]
+      files <- files[keep]
+      
+      if (length(keys) == 0) {
+        showNotification("No matching models found in bucket", type = "warning")
+        return(NULL)
+      }
+      
+      pattern_list <- switch(
+        shared$modelType,
+        "global"  = NULL,
+        "texture" = texture_list,
+        "order"   = order_list,
+        "depth"   = depth_list,
+        "lulc"    = LULC_list,
+        "mlra"    = MLRA_list
+      )
+      
+      adjust_name <- function(file) {
+        if (!is.null(pattern_list)) {
+          for (pat in names(pattern_list)) {
+            if (grepl(pat, file, ignore.case = TRUE)) {
+              return(pattern_list[[pat]])
+            }
+          }
+        }
+        tools::file_path_sans_ext(file)
+      }
+      
+      adjusted <- vapply(files, adjust_name, character(1))
+      choices <- setNames(keys, adjusted)
+      names(choices) <- make.unique(names(choices))
+      
+      if (shared$modelType == "depth") {
+        depth_labels_present <- names(choices)[names(choices) %in% depth_order]
+        choices <- choices[match(depth_order, depth_labels_present, nomatch = 0)]
+        choices <- choices[!is.na(choices)]
+        names(choices) <- depth_order[depth_order %in% depth_labels_present]
+      }
+      
+      choices
     })
     
     
@@ -318,6 +303,7 @@ modelSelectionServer <- function(id, shared, soilPropertyName) {
     })
     
     # Observe changes and load models accordingly
+    # Observe changes and load models accordingly
     observeEvent({
       input[[paste0(shared$modelType, "_model")]]
       input$modelType
@@ -325,14 +311,15 @@ modelSelectionServer <- function(id, shared, soilPropertyName) {
     }, {
       req(active())  
       req(shared$mlModel, shared$modelType)
+      
       if (shared$modelType == "global") {
         # --- Handling global PLS and CNN ---
         
         if (shared$mlModel == "PLS") {
-          model_file <- file.path(model_paths(), paste0(id, "_pls_model.rds"))
-          if (file.exists(model_file)) {
+          model_file <- bucket_key(model_prefixes(), paste0(id, "_pls_model.rds"))
+          if (bucket_object_exists(model_file)) {
             showNotification("Loaded PLS model file", type = "message")
-            shared$usedModel <- readRDS(model_file)
+            shared$usedModel <- read_bucket_rds(model_file)
           } else {
             showNotification("PLS model file not found", type = "warning")
             shared$usedModel <- NULL
@@ -340,11 +327,11 @@ modelSelectionServer <- function(id, shared, soilPropertyName) {
         } 
         else if (shared$mlModel == "CNN") {
           # Loading CNN model using Keras
-          model_file <- file.path(model_paths(), paste0(id, "_CNN_model.keras"))
-          if (file.exists(model_file)) {
+          model_file <- bucket_key(model_prefixes(), paste0(id, "_CNN_model.keras"))
+          if (bucket_object_exists(model_file)) {
             showNotification("Loaded CNN model file", type = "message")
             shared$usedModel <- tryCatch({
-              load_model_tf(model_file)
+              load_bucket_keras_model(model_file)
             }, error = function(e) {
               print(e$message)
               showNotification(paste("Error loading CNN model:", e$message), type = "error")
@@ -357,11 +344,11 @@ modelSelectionServer <- function(id, shared, soilPropertyName) {
         }
         else {
           # Load other models
-          model_file <- file.path(model_paths(), paste0(id, "_", find_model(), "_model.rds"))
+          model_file <- bucket_key(model_prefixes(), paste0(id, "_", find_model(), "_model.rds"))
           print(model_file)
-          if (file.exists(model_file)) {
+          if (bucket_object_exists(model_file)) {
             showNotification("Loaded model file", type = "message")
-            shared$usedModel <- readRDS(model_file)
+            shared$usedModel <- read_bucket_rds(model_file)
           } else {
             showNotification("Model file not found", type = "warning")
             shared$usedModel <- NULL
@@ -370,10 +357,10 @@ modelSelectionServer <- function(id, shared, soilPropertyName) {
         
         # Disable PCA plot if the model is CNN or PLS
         if (shared$mlModel != "PLS" && shared$mlModel != "CNN") {
-          pca_model_file <- file.path(model_paths(), paste0(id, "_pca", ".rds"))
-          if (file.exists(pca_model_file)) {
+          pca_model_file <- bucket_key(model_prefixes(), paste0(id, "_pca", ".rds"))
+          if (bucket_object_exists(pca_model_file)) {
             showNotification("PCA model found and loaded", type = "message")
-            shared$usedPCA <- readRDS(pca_model_file)
+            shared$usedPCA <- read_bucket_rds(pca_model_file)
           } else {
             shared$usedPCA <- NULL
             showNotification("PCA model file not found", type = "warning")
@@ -390,13 +377,13 @@ modelSelectionServer <- function(id, shared, soilPropertyName) {
         
         if (shared$mlModel == "CNN") {
           # Load CNN model using Keras
-          model_file <- file.path(model_paths(), model_input_value)
+          model_file <- model_input_value
           print(model_file)
           
-          if (file.exists(model_file)) {
+          if (bucket_object_exists(model_file)) {
             showNotification("Loaded CNN model file", type = "message")
             shared$usedModel <- tryCatch({
-              keras::load_model_tf(model_file)  # or keras::load_model(model_file) if your Keras version prefers it
+              load_bucket_keras_model(model_file)
             }, error = function(e) {
               showNotification(paste("Error loading CNN model:", e$message), type = "error")
               NULL
@@ -408,12 +395,12 @@ modelSelectionServer <- function(id, shared, soilPropertyName) {
           
           # CNN models don’t use a PCA companion
           shared$usedPCA <- NULL
-
+          
         } else {
           # Load the selected RDS model
-          model_file <- file.path(model_paths(), model_input_value)
-          if (file.exists(model_file)) {
-            shared$usedModel <- readRDS(model_file)
+          model_file <- model_input_value
+          if (bucket_object_exists(model_file)) {
+            shared$usedModel <- read_bucket_rds(model_file)
             print(shared$usedModel)
           } else {
             shared$usedModel <- NULL
@@ -446,21 +433,18 @@ modelSelectionServer <- function(id, shared, soilPropertyName) {
         print(paste0("Group Name:", shared$selectedGroupName))
         
         observeEvent(shared$modelType, {
-          
-          if(shared$modelType != oldmodelType) {
+          if (shared$modelType != oldmodelType) {
             shared$selectedGroupName <- NULL
           }
-          
         })
         
         
         # Disable PCA plot if the model is CNN or PLS
         if (shared$mlModel != "PLS" && shared$mlModel != "CNN") {
           # Load PCA model if applicable
-          
-          pca_model_file <- file.path(model_paths(), paste0(gsub(paste0(find_model(), "_model"), "pca", model_input_value)))
-          if (file.exists(pca_model_file)) {
-            shared$usedPCA <- readRDS(pca_model_file)
+          pca_model_file <- gsub(paste0(find_model(), "_model"), "pca", model_input_value)
+          if (bucket_object_exists(pca_model_file)) {
+            shared$usedPCA <- read_bucket_rds(pca_model_file)
             showNotification("PCA model found and loaded", type = "message")
             print(pca_model_file)
           } else {
