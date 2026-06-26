@@ -11,8 +11,16 @@ s3_opts <- function() {
   list(
     key = Sys.getenv("AWS_ACCESS_KEY_ID"),
     secret = Sys.getenv("AWS_SECRET_ACCESS_KEY"),
-    region = Sys.getenv("AWS_DEFAULT_REGION", unset = "auto"),
-    base_url = sub("^https?://", "", Sys.getenv("AWS_ENDPOINT_URL")),
+    
+    # IMPORTANT:
+    # leave region blank so aws.s3 does not build s3-<region>.amazonaws.com
+    region = "",
+    
+    # IMPORTANT:
+    # force Railway endpoint directly
+    base_url = "storage.railway.app",
+    
+    use_https = TRUE,
     url_style = Sys.getenv("S3_URL_STYLE", unset = "virtual"),
     check_region = FALSE
   )
@@ -40,9 +48,7 @@ list_bucket_keys <- function(prefix = "") {
   
   keys <- vapply(
     objs,
-    function(x) {
-      if (!is.null(x[["Key"]])) x[["Key"]] else NA_character_
-    },
+    function(x) if (!is.null(x[["Key"]])) x[["Key"]] else NA_character_,
     character(1)
   )
   
