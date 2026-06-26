@@ -3,17 +3,16 @@
 library(aws.s3)
 library(readr)
 
-# -----------------------------
-# Basic bucket config
-# -----------------------------
-bucket_name <- function() Sys.getenv("BUCKET_NAME")
+bucket_name <- function() {
+  Sys.getenv("BUCKET_NAME", unset = Sys.getenv("BUCKET"))
+}
 
 s3_opts <- function() {
   list(
-    key = Sys.getenv("AWS_ACCESS_KEY_ID"),
-    secret = Sys.getenv("AWS_SECRET_ACCESS_KEY"),
-    region = Sys.getenv("AWS_REGION", unset = ""),
-    base_url = sub("^https?://", "", Sys.getenv("AWS_S3_ENDPOINT")),
+    key = Sys.getenv("AWS_ACCESS_KEY_ID", unset = Sys.getenv("ACCESS_KEY_ID")),
+    secret = Sys.getenv("AWS_SECRET_ACCESS_KEY", unset = Sys.getenv("SECRET_ACCESS_KEY")),
+    region = Sys.getenv("AWS_REGION", unset = Sys.getenv("REGION", unset = "auto")),
+    base_url = sub("^https?://", "", Sys.getenv("AWS_S3_ENDPOINT", unset = Sys.getenv("ENDPOINT"))),
     url_style = Sys.getenv("S3_URL_STYLE", unset = "virtual"),
     check_region = FALSE
   )
@@ -23,9 +22,6 @@ s3_call <- function(fun, ...) {
   do.call(fun, c(list(...), s3_opts()))
 }
 
-# -----------------------------
-# Key/path helpers
-# -----------------------------
 bucket_key <- function(...) {
   parts <- unlist(list(...))
   parts <- parts[!is.na(parts) & nzchar(parts)]
@@ -57,9 +53,6 @@ bucket_object_exists <- function(object_key) {
   object_key %in% list_bucket_keys(object_key)
 }
 
-# -----------------------------
-# Delimited files
-# -----------------------------
 read_bucket_delim <- function(object_key, delim = ",") {
   s3_call(
     aws.s3::s3read_using,
@@ -71,23 +64,6 @@ read_bucket_delim <- function(object_key, delim = ",") {
   )
 }
 
-write_bucket_delim <- function(df, object_key, delim = ",") {
-  tmp <- tempfile(fileext = ".txt")
-  on.exit(unlink(tmp), add = TRUE)
-  
-  readr::write_delim(df, tmp, delim = delim)
-  
-  s3_call(
-    aws.s3::put_object,
-    file = tmp,
-    object = object_key,
-    bucket = bucket_name()
-  )
-}
-
-# -----------------------------
-# RDS helpers
-# -----------------------------
 read_bucket_rds <- function(object_key) {
   s3_call(
     aws.s3::s3readRDS,
@@ -105,9 +81,6 @@ write_bucket_rds <- function(x, object_key) {
   )
 }
 
-# -----------------------------
-# Generic file download/upload
-# -----------------------------
 download_bucket_file <- function(object_key, local_file) {
   s3_call(
     aws.s3::save_object,
@@ -139,9 +112,6 @@ download_bucket_temp <- function(object_key, ext = "") {
   tmp
 }
 
-# -----------------------------
-# Model helpers
-# -----------------------------
 read_bucket_model_rds <- function(object_key) {
   read_bucket_rds(object_key)
 }
