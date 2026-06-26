@@ -12,7 +12,7 @@ s3_opts <- function() {
     region = Sys.getenv("AWS_DEFAULT_REGION"),
     base_url = sub("^https?://", "", Sys.getenv("AWS_ENDPOINT_URL")),
     use_https = TRUE,
-    url_style = Sys.getenv("S3_URL_STYLE", unset = "virtual"),
+    url_style = Sys.getenv("S3_URL_STYLE", unset = "path"),
     check_region = FALSE
   )
 }
