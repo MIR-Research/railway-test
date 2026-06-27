@@ -9,7 +9,7 @@ s3_opts <- function() {
   list(
     key = Sys.getenv("AWS_ACCESS_KEY_ID"),
     secret = Sys.getenv("AWS_SECRET_ACCESS_KEY"),
-    region = Sys.getenv("AWS_DEFAULT_REGION"),
+    region = "",
     base_url = sub("^https?://", "", Sys.getenv("AWS_ENDPOINT_URL")),
     use_https = TRUE,
     url_style = Sys.getenv("S3_URL_STYLE", unset = "path"),
