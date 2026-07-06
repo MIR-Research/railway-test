@@ -1161,7 +1161,7 @@ dataAggregationServer <- function(id, shared, session) {
           mat  <- snv_mat()
           samp <- avg_df()$scan_path_name
           df_out <- data.frame(
-            scan_path_name = samp,
+            samp <- avg_df()[[1]],
             as.data.frame(mat, check.names = FALSE),
             check.names = FALSE,
             stringsAsFactors = FALSE
