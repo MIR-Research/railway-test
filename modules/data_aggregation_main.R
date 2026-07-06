@@ -187,33 +187,9 @@ dataAggregationUI <- function(id) {
             downloadButton(ns("download_mir_jpg"), "Download Raw JPG")
           )
         ),
-        br(),
-        card(
-          full_screen = TRUE,
-          card_header = "MIR + Savitzky-Golay Plot",
-          card_body(
-            plotOutput(ns("sg_plot")),
-            downloadButton(ns("download_sg_jpg"), "Download SG JPG")
-          )
-        ),
-        br(),
-        card(
-          full_screen = TRUE,
-          card_header = "Resample Plot",
-          card_body(
-            plotOutput(ns("resample_plot")),
-            downloadButton(ns("download_resample_jpg"), "Download Resample JPG")
-          )
-        ),
-        br(),
-        card(
-          full_screen = TRUE,
-          card_header = "Standard Normal Variate Plot",
-          card_body(
-            plotOutput(ns("snv_plot")),
-            downloadButton(ns("download_snv_jpg"), "Download SNV JPG")
-          )
-        )
+        uiOutput(ns("sg_card")),
+        uiOutput(ns("resample_card")),
+        uiOutput(ns("snv_card"))
       )
     )
   )
@@ -677,6 +653,12 @@ dataAggregationServer <- function(id, shared, session) {
       cfg0
     })
     
+    # snapshot of cfg() at the moment "Start" is clicked, so the plot cards
+    # below show/hide in sync with what was actually run, not live checkbox state
+    last_cfg <- eventReactive(input$start, {
+      cfg()
+    })
+    
     
     # 3. agg_df(): just the “one‐row‐per‐file” table
     agg_df <- eventReactive(input$start, {
@@ -1068,6 +1050,58 @@ dataAggregationServer <- function(id, shared, session) {
     outputOptions(output, "sg_plot",       suspendWhenHidden = FALSE)
     outputOptions(output, "resample_plot", suspendWhenHidden = FALSE)
     outputOptions(output, "snv_plot",      suspendWhenHidden = FALSE)
+    
+    # Only show each optional plot's card if that preprocessing step was run
+    output$sg_card <- renderUI({
+      req(input$start)
+      c <- last_cfg()
+      if (!isTRUE(c$sg)) return(NULL)
+      tagList(
+        br(),
+        card(
+          full_screen = TRUE,
+          card_header = "MIR + Savitzky-Golay Plot",
+          card_body(
+            plotOutput(ns("sg_plot")),
+            downloadButton(ns("download_sg_jpg"), "Download SG JPG")
+          )
+        )
+      )
+    })
+    
+    output$resample_card <- renderUI({
+      req(input$start)
+      c <- last_cfg()
+      if (!isTRUE(c$resampled)) return(NULL)
+      tagList(
+        br(),
+        card(
+          full_screen = TRUE,
+          card_header = "Resample Plot",
+          card_body(
+            plotOutput(ns("resample_plot")),
+            downloadButton(ns("download_resample_jpg"), "Download Resample JPG")
+          )
+        )
+      )
+    })
+    
+    output$snv_card <- renderUI({
+      req(input$start)
+      c <- last_cfg()
+      if (!isTRUE(c$snv)) return(NULL)
+      tagList(
+        br(),
+        card(
+          full_screen = TRUE,
+          card_header = "Standard Normal Variate Plot",
+          card_body(
+            plotOutput(ns("snv_plot")),
+            downloadButton(ns("download_snv_jpg"), "Download SNV JPG")
+          )
+        )
+      )
+    })
     
     
     #-----------
