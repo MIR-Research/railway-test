@@ -253,7 +253,11 @@ dataAggregationServer <- function(id, shared, session) {
       orig_start_seq_opus = NULL,
       orig_stop_seq_opus = NULL,
       snipped_start_seq_opus = NULL,
-      snipped_stop_seq_opus = NULL
+      snipped_stop_seq_opus = NULL,
+      orig_start_seq_csv = NULL,
+      orig_stop_seq_csv = NULL,
+      snipped_start_seq_csv = NULL,
+      snipped_stop_seq_csv = NULL
     )
     
     observeEvent(input$goto_user_guide, {
@@ -376,6 +380,10 @@ dataAggregationServer <- function(id, shared, session) {
             # record start / stop only once, and only after the above test
             if (is.null(rv$start_seq_csv)) rv$start_seq_csv <- vals$wn[1]
             if (is.null(rv$stop_seq_csv))  rv$stop_seq_csv  <- vals$wn[nrow(vals)]
+            
+            # preserve original range for metadata
+            if (is.null(rv$orig_start_seq_csv)) rv$orig_start_seq_csv <- vals$wn[1]
+            if (is.null(rv$orig_stop_seq_csv))  rv$orig_stop_seq_csv  <- vals$wn[nrow(vals)]
             
             t(vals$abs)          # keep transpose just as before
             # Individual scans must be transposed prior to prior to Rbind
@@ -524,6 +532,13 @@ dataAggregationServer <- function(id, shared, session) {
         rv$orig_stop_seq_opus    <- NULL
         rv$snipped_start_seq_opus <- NULL
         rv$snipped_stop_seq_opus  <- NULL
+        # reset CSV range tracking for this upload
+        rv$start_seq_csv          <- NULL
+        rv$stop_seq_csv           <- NULL
+        rv$orig_start_seq_csv     <- NULL
+        rv$orig_stop_seq_csv      <- NULL
+        rv$snipped_start_seq_csv  <- NULL
+        rv$snipped_stop_seq_csv   <- NULL
         
         # Unique temp dir
         temp_dir <- file.path(tempdir(), paste0("upload_", format(Sys.time(), "%Y%m%d%H%M%S")))
@@ -590,6 +605,12 @@ dataAggregationServer <- function(id, shared, session) {
           if (any(is.na(wns))) stop("CSV column names must all be numeric wavenumbers")
           rv$start_seq_csv <- min(wns)
           rv$stop_seq_csv  <- max(wns)
+          
+          # preserve original range for metadata
+          rv$orig_start_seq_csv <- max(wns)
+          rv$orig_stop_seq_csv  <- min(wns)
+          rv$snipped_start_seq_csv <- NULL
+          rv$snipped_stop_seq_csv  <- NULL
           
           incProgress(0.2, detail = "Done")
           df
@@ -701,7 +722,7 @@ dataAggregationServer <- function(id, shared, session) {
       
       data_cols <- 2:ncol(df)
       
-      # For OPUS, figure out which columns will survive the later snip
+      # figure out which columns survive the wavenumber snip (599-4000.99 cm⁻¹)
       keep_wave_cols <- data_cols
       wn_full <- NULL
       
@@ -711,7 +732,17 @@ dataAggregationServer <- function(id, shared, session) {
           to   = rv$stop_seq_opus,
           length.out = length(data_cols)
         )
-        
+      } else if (input$upload_type == "raw" && input$file_type == "csv" && length(data_cols) > 0) {
+        wn_full <- seq(
+          from = rv$start_seq_csv,
+          to   = rv$stop_seq_csv,
+          length.out = length(data_cols)
+        )
+      } else if (input$upload_type == "partial" && length(data_cols) > 0) {
+        wn_full <- as.numeric(colnames(df)[data_cols])
+      }
+      
+      if (!is.null(wn_full)) {
         keep_mask <- !is.na(wn_full) & wn_full >= 599 & wn_full <= 4000.99
         if (any(keep_mask)) {
           keep_wave_cols <- data_cols[keep_mask]
@@ -728,26 +759,36 @@ dataAggregationServer <- function(id, shared, session) {
         ]
       }
       
-      # Now actually snip the OPUS wavelengths
-      if (input$upload_type == "raw" && input$file_type == "opus" && length(data_cols) > 0) {
-        if (!is.null(wn_full)) {
-          keep_mask <- !is.na(wn_full) & wn_full >= 599 & wn_full <= 4000.99
+      # Now actually snip down to the target wavenumber range
+      if (!is.null(wn_full)) {
+        keep_mask <- !is.na(wn_full) & wn_full >= 599 & wn_full <= 4000.99
+        
+        if (any(keep_mask)) {
+          df <- cbind(
+            df[, 1, drop = FALSE],
+            df[, data_cols[keep_mask], drop = FALSE]
+          )
           
-          if (any(keep_mask)) {
-            df <- cbind(
-              df[, 1, drop = FALSE],
-              df[, data_cols[keep_mask], drop = FALSE]
-            )
-            
+          if (input$upload_type == "raw" && input$file_type == "opus") {
             rv$snipped_start_seq_opus <- max(wn_full[keep_mask], na.rm = TRUE)
             rv$snipped_stop_seq_opus  <- min(wn_full[keep_mask], na.rm = TRUE)
             
             # update downstream range to the snipped range
             rv$start_seq_opus <- rv$snipped_start_seq_opus
             rv$stop_seq_opus  <- rv$snipped_stop_seq_opus
-          } else {
-            log_debug("OPUS post-filter clipping found 0 columns in [599, 4000.99].")
+          } else if (input$upload_type == "raw" && input$file_type == "csv") {
+            rv$snipped_start_seq_csv <- max(wn_full[keep_mask], na.rm = TRUE)
+            rv$snipped_stop_seq_csv  <- min(wn_full[keep_mask], na.rm = TRUE)
+            
+            # update downstream range to the snipped range
+            rv$start_seq_csv <- rv$snipped_start_seq_csv
+            rv$stop_seq_csv  <- rv$snipped_stop_seq_csv
+          } else if (input$upload_type == "partial") {
+            rv$snipped_start_seq_csv <- max(wn_full[keep_mask], na.rm = TRUE)
+            rv$snipped_stop_seq_csv  <- min(wn_full[keep_mask], na.rm = TRUE)
           }
+        } else {
+          log_debug("Post-filter clipping found 0 columns in [599, 4000.99].")
         }
       }
       
@@ -1159,9 +1200,9 @@ dataAggregationServer <- function(id, shared, session) {
         withProgress(message = "Packaging download…", value = 0, {
           incProgress(0.2, detail = "Assembling matrix…")
           mat  <- snv_mat()
-          samp <- avg_df()$scan_path_name
+          samp <- avg_df()[[1]]  # ID column name varies by upload type
           df_out <- data.frame(
-            samp <- avg_df()[[1]],
+            scan_path_name = samp,
             as.data.frame(mat, check.names = FALSE),
             check.names = FALSE,
             stringsAsFactors = FALSE
@@ -1197,11 +1238,24 @@ dataAggregationServer <- function(id, shared, session) {
             "\n      R ", getRversion(), " (prospectr, shiny, shinyWidgets)"
           )
           
-          if (input$upload_type == "raw" && input$file_type == "opus") {
-            orig_hi <- isolate(rv$orig_start_seq_opus)
-            orig_lo <- isolate(rv$orig_stop_seq_opus)
-            snip_hi <- isolate(rv$snipped_start_seq_opus)
-            snip_lo <- isolate(rv$snipped_stop_seq_opus)
+          if ((input$upload_type == "raw" && input$file_type == "opus") ||
+              (input$upload_type == "raw" && input$file_type == "csv") ||
+              input$upload_type == "partial") {
+            
+            if (input$upload_type == "partial" ||
+                (input$upload_type == "raw" && input$file_type == "csv")) {
+              orig_hi   <- isolate(rv$orig_start_seq_csv)
+              orig_lo   <- isolate(rv$orig_stop_seq_csv)
+              snip_hi   <- isolate(rv$snipped_start_seq_csv)
+              snip_lo   <- isolate(rv$snipped_stop_seq_csv)
+              range_lbl <- "CSV"
+            } else {
+              orig_hi   <- isolate(rv$orig_start_seq_opus)
+              orig_lo   <- isolate(rv$orig_stop_seq_opus)
+              snip_hi   <- isolate(rv$snipped_start_seq_opus)
+              snip_lo   <- isolate(rv$snipped_stop_seq_opus)
+              range_lbl <- "OPUS"
+            }
             
             if (is.null(snip_hi) || is.null(snip_lo)) {
               snip_hi <- orig_hi
@@ -1218,7 +1272,7 @@ dataAggregationServer <- function(id, shared, session) {
             
             wn_note <- paste(
               "\n\nWavenumber trimming:",
-              sprintf("\n      Original OPUS range : %s to %s cm⁻¹", orig_hi, orig_lo),
+              sprintf("\n      Original %-4s range : %s to %s cm⁻¹", range_lbl, orig_hi, orig_lo),
               sprintf("\n      Final output range  : %s to %s cm⁻¹", snip_hi, snip_lo),
               sprintf("\n      Snipping applied    : %s", trim_msg)
             )
