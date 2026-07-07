@@ -974,7 +974,7 @@ dataAggregationServer <- function(id, shared, session) {
         y    = t(m),
         type = "l",
         xlim = rev(range(as.numeric(colnames(m)))),
-        xlab = "Wavenumber (cm⁻¹)",
+        xlab = expression(paste("Wavenumber (cm"^-1, ")")),
         ylab = "Absorbance"
       )
     })
@@ -996,7 +996,7 @@ dataAggregationServer <- function(id, shared, session) {
         y    = t(m),
         type = "l",
         xlim = rev(range(as.numeric(colnames(m)))),
-        xlab = "Wavenumber (cm⁻¹)",
+        xlab = expression(paste("Wavenumber (cm"^-1, ")")),
         ylab = "Absorbance"
       )
     })
@@ -1018,7 +1018,7 @@ dataAggregationServer <- function(id, shared, session) {
         y    = t(m),
         type = "l",
         xlim = rev(range(as.numeric(colnames(m)))),
-        xlab = "Wavenumber (cm⁻¹)",
+        xlab = expression(paste("Wavenumber (cm"^-1, ")")),
         ylab = "Absorbance"
       )
     })
@@ -1040,7 +1040,7 @@ dataAggregationServer <- function(id, shared, session) {
         y    = t(m),
         type = "l",
         xlim = rev(range(as.numeric(colnames(m)))),
-        xlab = "Wavenumber (cm⁻¹)",
+        xlab = expression(paste("Wavenumber (cm"^-1, ")")),
         ylab = "Absorbance"
       )
     })
@@ -1139,7 +1139,7 @@ dataAggregationServer <- function(id, shared, session) {
           y    = t(m),
           type = "l",
           xlim = rev(range(as.numeric(colnames(m)))),
-          xlab = "Wavenumber (cm⁻¹)",
+          xlab = expression(paste("Wavenumber (cm"^-1, ")")),
           ylab = "Absorbance"
         )
         dev.off()
@@ -1166,7 +1166,7 @@ dataAggregationServer <- function(id, shared, session) {
           y    = t(m),
           type = "l",
           xlim = rev(range(as.numeric(colnames(m)))),
-          xlab = "Wavenumber (cm⁻¹)",
+          xlab = expression(paste("Wavenumber (cm"^-1, ")")),
           ylab = "Absorbance"
         )
         dev.off()
@@ -1193,7 +1193,7 @@ dataAggregationServer <- function(id, shared, session) {
           y    = t(m),
           type = "l",
           xlim = rev(range(as.numeric(colnames(m)))),
-          xlab = "Wavenumber (cm⁻¹)",
+          xlab = expression(paste("Wavenumber (cm"^-1, ")")),
           ylab = "Absorbance"
         )
         dev.off()
@@ -1220,7 +1220,7 @@ dataAggregationServer <- function(id, shared, session) {
           y    = t(m),
           type = "l",
           xlim = rev(range(as.numeric(colnames(m)))),
-          xlab = "Wavenumber (cm⁻¹)",
+          xlab = expression(paste("Wavenumber (cm"^-1, ")")),
           ylab = "Absorbance"
         )
         dev.off()
