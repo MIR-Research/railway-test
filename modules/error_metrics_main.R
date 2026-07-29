@@ -43,12 +43,12 @@ errorMetricsServer <- function(id, shared) {
     )
     
     uncert_dir_mapping <- list(
-      "Order"   = "uncertainty_vals/Orders",
-      "Global"  = "uncertainty_vals/Global",
-      "Texture" = "uncertainty_vals/Texture_classes",
-      "Depth"   = "uncertainty_vals/Depths",
-      "MLRA"    = "uncertainty_vals/MLRA",
-      "LULC"    = "uncertainty_vals/LULC"
+      "Order"   = "Uncertainty_vals/Orders",
+      "Global"  = "Uncertainty_vals/Global",
+      "Texture" = "Uncertainty_vals/Texture_classes",
+      "Depth"   = "Uncertainty_vals/Depths",
+      "MLRA"    = "Uncertainty_vals/MLRA",
+      "LULC"    = "Uncertainty_vals/LULC"
     )
     
     ml_models <- c("Cubist", "PLS", "RF", "SVM", "CNN")
