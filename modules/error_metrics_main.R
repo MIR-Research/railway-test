@@ -156,6 +156,11 @@ errorMetricsServer <- function(id, shared) {
         if (!(col %in% names(df))) df[[col]] <- NA
       }
       
+      metric_cols <- c("R2.val", "RMSE.val", "RPIQ.val", "RPD.val")
+      for (col in metric_cols) {
+        df[[col]] <- suppressWarnings(as.numeric(df[[col]]))
+      }
+      
       keep_cols <- c("filename", "ML_Model", "ModelType", "strat",
                      "R2.val", "RMSE.val", "RPIQ.val", "RPD.val")
       
@@ -181,6 +186,11 @@ errorMetricsServer <- function(id, shared) {
       keep_cols <- c("filename", "ML_Model", "ModelType", "strat",
                      "R2.val", "RMSE.val", "RPIQ.val", "RPD.val")
       df <- df[, keep_cols, drop = FALSE]
+      
+      metric_cols <- c("R2.val", "RMSE.val", "RPIQ.val", "RPD.val")
+      for (col in metric_cols) {
+        df[[col]] <- suppressWarnings(as.numeric(df[[col]]))
+      }
       
       names(df)[names(df) == "R2.val"]   <- "R2.sd"
       names(df)[names(df) == "RMSE.val"] <- "RMSE.sd"
@@ -277,6 +287,6 @@ errorMetricsServer <- function(id, shared) {
         rownames = FALSE,
         options = list(pageLength = 10, scrollX = TRUE)
       )
-    })
+    }, server = FALSE)
   })
 }
