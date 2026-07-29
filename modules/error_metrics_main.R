@@ -31,6 +31,8 @@ errorMetricsUI <- function(id) {
 errorMetricsServer <- function(id, shared) {
   moduleServer(id, function(input, output, session) {
     
+    # Bucket prefixes (these are object-key prefixes in the bucket,
+    # NOT local paths). They mirror the mapping used in model_selection_main.R.
     dir_mapping <- list(
       "Order"   = "models/Orders",
       "Global"  = "models/Global",
@@ -76,6 +78,13 @@ errorMetricsServer <- function(id, shared) {
       )
     }
     
+    # Reads the error-metric CSVs from the bucket.
+    #
+    # For every stratification category and ML model we build the bucket
+    # prefix (e.g. "models/Orders/RF"), list the objects under it, keep the
+    # .csv keys, and read each one straight out of the bucket. This replaces
+    # the old local-filesystem approach (dir.exists / list.files / read.csv)
+    # that only worked when the model folders were present on disk.
     collect_csvs <- function(mapping, include_uncertainty = FALSE) {
       all_dfs <- list()
       
@@ -83,12 +92,23 @@ errorMetricsServer <- function(id, shared) {
         base_dir <- mapping[[category]]
         
         for (ml_model in ml_models) {
-          folder <- file.path(base_dir, ml_model)
-          if (!dir.exists(folder)) next
+          # Bucket-key prefix for this category + model, using the same
+          # helper model_selection_main.R uses to build object keys.
+          prefix <- bucket_key(base_dir, ml_model)
           
-          csv_files <- list.files(folder, pattern = "\\.csv$", full.names = TRUE)
+          # List everything under the prefix. If the prefix doesn't exist
+          # (or listing fails), treat it as empty and move on.
+          keys <- tryCatch(
+            list_model_keys(prefix),
+            error = function(e) character(0)
+          )
+          if (length(keys) == 0) next
+          
+          # Keep only CSV objects.
+          csv_files <- keys[grepl("\\.csv$", basename(keys), ignore.case = TRUE)]
           if (length(csv_files) == 0) next
           
+          # Split uncertainty vs. regular error files by filename.
           if (include_uncertainty) {
             csv_files <- csv_files[grepl("uncertainty", basename(csv_files), ignore.case = TRUE)]
           } else {
@@ -98,9 +118,13 @@ errorMetricsServer <- function(id, shared) {
           if (length(csv_files) == 0) next
           
           for (f in csv_files) {
-            df <- tryCatch(read.csv(f, stringsAsFactors = FALSE),
-                           error = function(e) NULL)
-            if (is.null(df)) next
+            # Read the CSV directly from the bucket. read_bucket_delim is the
+            # same reader main.R uses for the Full_DFs / spectral_data objects.
+            df <- tryCatch(
+              as.data.frame(read_bucket_delim(f, delim = ",")),
+              error = function(e) NULL
+            )
+            if (is.null(df) || nrow(df) == 0) next
             
             df$ModelType  <- category
             df$ML_Model   <- ml_model
