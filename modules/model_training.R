@@ -873,7 +873,7 @@ modelTrainingServer <- function(id, shared, load_spectral_data_memo) {
       trainedPCA   <- reactiveVal(NULL)
       
       ###### 7. Plot Outputs ######
-      observeEvent(shared$trainModel == 1, {
+      observeEvent(isTRUE(shared$trainModel == 1), {
         doPCA <- if(shared$trainType == "Partial Least Squares") {
           FALSE 
         } 
@@ -944,7 +944,7 @@ modelTrainingServer <- function(id, shared, load_spectral_data_memo) {
       
       ###### 8. Main training observe ######
       observe({
-        if (shared$trainModel == 1) {
+        if (isTRUE(shared$trainModel == 1)) {
           shared$trainModel <- 0
           req(data_reactive())
           
