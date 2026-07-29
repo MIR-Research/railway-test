@@ -1,6 +1,7 @@
 # main.R
 
 # In Desc Stats, adjust so when using strats "Show All" shows all in the strat category, and Pin the navbar to the top so we see it when scrolling
+options(shiny.fullstacktrace = TRUE)
 
 options(warn = -1)
 
