@@ -874,14 +874,12 @@ modelTrainingServer <- function(id, shared, load_spectral_data_memo) {
       
       ###### 7. Plot Outputs ######
       observeEvent(isTRUE(shared$trainModel == 1), {
-        doPCA <- if(shared$trainType == "Partial Least Squares") {
-          FALSE 
-        } 
-        else if (shared$trainType == "CNN") {
+        req(isTRUE(shared$trainModel == 1))   # bail unless the flag is really set
+        req(shared$trainType)                 # bail unless a model type is chosen
+        doPCA <- if (shared$trainType %in% c("Partial Least Squares", "CNN")) {
           FALSE
-        }
-        else {
-          input$trainPCA
+        } else {
+          isTRUE(input$trainPCA)
         }
         output$trainedModelPlot <- renderPlot({
           mod <- trainedModel()
