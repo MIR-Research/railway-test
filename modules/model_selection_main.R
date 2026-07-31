@@ -100,7 +100,7 @@ modelSelectionUI <- function(id) {
   fluidPage(
     card(
       min_height = "300px",
-      max_height = "300px",
+      # max_height = "300px",
       card_header("Model Selection"),
       card_body(
         layout_column_wrap(
