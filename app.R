@@ -707,7 +707,14 @@ server <- function(input, output, session) {
     committees  = 100,
     neighbors   = 0,
     page_navbar = "home",
-    extraction_method = NULL
+    extraction_method = NULL,
+    page_navbar = "home",
+    extraction_method = NULL,
+    choicesFull = FALSE,
+    render_tick = 0,
+    map_done    = FALSE,
+    stats_done  = FALSE,
+    plots_done  = FALSE
   )
   
   # Show error metrics button if static models page is selected
