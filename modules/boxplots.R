@@ -63,7 +63,7 @@ boxPlotsServer <- function(id, shared, fs_cache, load_spectral_data_memo) {
       )
     }
     
-    data_reactive <- reactive({
+    data_reactive <- eventReactive(shared$render_tick, {
       req(shared$selectedProperty)
       
       df <- load_spectral_data_memo(shared$selectedProperty)
@@ -128,24 +128,27 @@ boxPlotsServer <- function(id, shared, fs_cache, load_spectral_data_memo) {
       }
       
       df
-    })
+    }, ignoreInit = TRUE)
     
+    observeEvent(data_reactive(), {
+      isolate(shared$plots_done <- TRUE)
+    }, ignoreInit = TRUE)
     
     output$boxplot <- renderPlot({
       
-      validate(
-        need(!is.null(shared$modelType) && nzchar(shared$modelType),
-             "Please select a stratification method to see boxplots")
-      )
+      validate(need(shared$render_tick > 0L, "Click Confirm Choices to render boxplots"))
       
       df <- data_reactive()
       req(df)
       
+      mt <- isolate(shared$modelType)          # <- key
+      sel <- isolate(shared$selectedGroupName) # <- key
+      
       # Figure out what group is "selected." If the user chose a sub-model 
       # (MLRA A, etc.), shared$selectedGroupName will be that label. 
       # If it's empty or global, there's nothing to highlight.
-      selected_group <- if (!is.null(shared$selectedGroupName) && nchar(shared$selectedGroupName) > 0) {
-        shared$selectedGroupName
+      selected_group <- if (!is.null(sel) && nchar(sel) > 0) {
+        sel
       } else {
         NA_character_
       }
@@ -194,11 +197,12 @@ boxPlotsServer <- function(id, shared, fs_cache, load_spectral_data_memo) {
         )
       
       # If "global," we can flip for a single horizontal box
-      if (shared$modelType == "global") {
+      if (mt == "global") {
         p <- p + coord_flip()
       }
       
       p
+      
     }) 
   })
 }

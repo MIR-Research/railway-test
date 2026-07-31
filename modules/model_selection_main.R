@@ -137,6 +137,11 @@ modelSelectionUI <- function(id) {
                         "Sample Depth" = "depth"),
             selected = character(0)
           )
+        ),
+        # Nothing downstream renders until the user confirms their selection.
+        actionButton(
+          ns("confirm_choices"),
+          "Confirm Choices"
         )
       )
     )
@@ -161,6 +166,53 @@ modelSelectionServer <- function(id, shared, soilPropertyName) {
       shared$modelType <- input$modelType
     }, ignoreNULL = FALSE)
     
+    # -----------------------------------------------------------------
+    # Confirm-choices gating
+    # -----------------------------------------------------------------
+    # TRUE only when this module has a complete, valid selection:
+    #   - an ML model is chosen
+    #   - a stratification method is chosen
+    #   - for non-global methods, a specific stratified model is chosen too
+    choicesFull <- reactive({
+      # mlModel must be chosen
+      if (!isTruthy(input$mlModel) || input$mlModel == "") return(FALSE)
+      
+      # modelType must be chosen
+      if (!isTruthy(input$modelType) || input$modelType == "") return(FALSE)
+      
+      # global: mlModel alone is enough
+      if (identical(input$modelType, "global")) return(TRUE)
+      
+      # non-global: require the corresponding stratification selection
+      strat_id  <- paste0(input$modelType, "_model")   # e.g. "texture_model"
+      strat_val <- input[[strat_id]]
+      
+      isTruthy(strat_val) && nzchar(strat_val)
+    })
+    
+    # Enable the confirm button only when the selection is complete.
+    observeEvent(choicesFull(), {
+      if (!isTRUE(choicesFull())) {
+        shared$choicesFull <- FALSE
+        shinyjs::disable("confirm_choices")
+      } else {
+        shared$choicesFull <- TRUE
+        shinyjs::enable("confirm_choices")
+      }
+    })
+    
+    # On confirm: reset the per-cycle "done" flags and bump the render tick.
+    # Downstream modules watch shared$render_tick and (re)render only then.
+    observeEvent(input$confirm_choices, {
+      req(isTRUE(choicesFull()))
+      
+      # start a fresh render cycle
+      shared$map_done   <- FALSE
+      shared$stats_done <- FALSE
+      shared$plots_done <- FALSE
+      
+      shared$render_tick <- shared$render_tick + 1
+    })
     
     # inside modelSelectionServer
     find_model <- reactive({
@@ -393,7 +445,7 @@ modelSelectionServer <- function(id, shared, soilPropertyName) {
             shared$usedModel <- NULL
           }
           
-          # CNN models don’t use a PCA companion
+          # CNN models don't use a PCA companion
           shared$usedPCA <- NULL
           
         } else {
@@ -458,4 +510,3 @@ modelSelectionServer <- function(id, shared, soilPropertyName) {
     })
   })
 }
-

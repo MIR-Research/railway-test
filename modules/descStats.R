@@ -227,7 +227,7 @@ descriptiveStatsServer <- function(id, shared, load_spectral_data_memo) {
       NULL
     })
     
-    displayed_stats <- reactive({
+    displayed_stats <- eventReactive(shared$render_tick, {
       df <- base_data()
       if (nrow(df) == 0) {
         return(data.frame(
@@ -289,10 +289,14 @@ descriptiveStatsServer <- function(id, shared, load_spectral_data_memo) {
         }
       }
       
-      df_stats %>%
-        rename(`25%` = f_Quartile, `75%` = T_quartile)
-    })
+      out <- df_stats %>% rename(`25%` = f_Quartile, `75%` = T_quartile)
+      
+      out
+    }, ignoreInit = TRUE)
     
+    observeEvent(displayed_stats(), {
+      isolate(shared$stats_done <- TRUE)
+    }, ignoreInit = TRUE)
     
     output$desc_table <- renderDT({
       

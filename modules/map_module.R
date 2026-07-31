@@ -34,7 +34,7 @@ mapServer <- function(id, shared, fs_cache, load_map_data_memo) {
     })
 
     # Reactive to filter the original data based on shared$modelType and shared$selectedGroupName.
-    filtered_data <- reactive({
+    filtered_data <- eventReactive(shared$render_tick, {
       # Start fresh from the original data every time
       df <- original_data()[, 1:27]
       
@@ -66,54 +66,58 @@ mapServer <- function(id, shared, fs_cache, load_map_data_memo) {
         df <- df[!is.na(df$latitude_std_decimal_degrees) &
                    !is.na(df$longitude_std_decimal_degrees), ]
       }
-      
+     
       df
-    })
+    }, ignoreInit = TRUE)
 
+    observeEvent(filtered_data(), {
+      isolate(shared$map_done <- TRUE)
+    }, ignoreInit = TRUE)
+    
     output$map <- renderLeaflet({
       req(filtered_data())
-      
       df <- filtered_data()
       
-      if (is.null(shared$modelType)) {
-        color_col <- NULL
-      } else {
-        # Determine the column to use for coloring/filtering
-        color_col <- switch(shared$modelType,
-                            "order" = "taxonomic_order",
-                            "lulc"  = "LULC",
-                            "mlra"  = "MLRA",
-                            NULL)
-      }
+      # Freeze until next confirm, and force length-1 or NULL
+      mt <- isolate(shared$modelType)
+      if (length(mt) != 1 || !nzchar(mt)) mt <- NULL
       
+      # Determine the column to use for coloring/filtering (based on frozen mt)
+      color_col <- switch(mt,
+                          "order" = "taxonomic_order",
+                          "lulc"  = "LULC",
+                          "mlra"  = "MLRA",
+                          NULL)
       
-      # Convert the data to an sf object for leaflet mapping.
-      sample_locations <- st_as_sf(df, coords = c("longitude_std_decimal_degrees", "latitude_std_decimal_degrees"), crs = 4326)
+      sample_locations <- st_as_sf(
+        df,
+        coords = c("longitude_std_decimal_degrees", "latitude_std_decimal_degrees"),
+        crs = 4326
+      )
       
       if (nrow(df) == 0) {
         showNotification("No points available for this selection.", type = "warning")
       }
       
-      # Prepare the popup columns (only include columns that exist in the data)
-      popup_cols <- c("analyte_name", "taxon_name", "taxon_kind", "taxonomic_classification_name",
-                      "taxonomic_order", "taxonomic_suborder", "taxonomic_subgroup",
-                      "taxonomic_moisture_subclass", "taxonomic_temp_regime", "LULC")
+      popup_cols <- c(
+        "analyte_name", "taxon_name", "taxon_kind", "taxonomic_classification_name",
+        "taxonomic_order", "taxonomic_suborder", "taxonomic_subgroup",
+        "taxonomic_moisture_subclass", "taxonomic_temp_regime", "LULC"
+      )
       popup_cols <- popup_cols[popup_cols %in% names(df)]
       
-      # Generate popup content for each point.
       popup_content <- apply(df[popup_cols], 1, function(row) {
         paste0("<b>", popup_cols, ":</b> ", row, collapse = "<br>")
       })
       
-      # Build the color palette if applicable.
       pal <- NULL
       if (!is.null(color_col) && color_col %in% names(df) && nrow(df) > 0) {
         categories <- unique(df[[color_col]])
         pal <- colorFactor(brewer.pal(min(length(categories), 12), "Paired"), df[[color_col]])
       }
       
-      # Create the leaflet map.
       m <- leaflet(sample_locations) %>% addTiles()
+      
       if (!is.null(pal) && !is.null(color_col)) {
         m <- m %>%
           addCircleMarkers(
@@ -126,7 +130,7 @@ mapServer <- function(id, shared, fs_cache, load_map_data_memo) {
             position = "bottomright",
             pal = pal,
             values = ~get(color_col),
-            title = switch(shared$modelType,
+            title = switch(mt,
                            "order" = "Soil Order",
                            "lulc"  = "Landuse",
                            "mlra"  = "MLRA",
@@ -144,6 +148,7 @@ mapServer <- function(id, shared, fs_cache, load_map_data_memo) {
       }
       
       m
-    }) 
+    })
+    
   })
 }
