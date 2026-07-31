@@ -138,6 +138,7 @@ modelSelectionUI <- function(id) {
             selected = character(0)
           )
         ),
+        br(),
         # Nothing downstream renders until the user confirms their selection.
         actionButton(
           ns("confirm_choices"),
