@@ -9,6 +9,8 @@ dataInputUI <- function(id) {
   
   ns <- NS(id)
   card(
+    min_height = "320px",
+    max_height = "320px",
     card_header("Data Input"),
     card_body(
       fileInput(

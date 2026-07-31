@@ -100,11 +100,11 @@ modelSelectionUI <- function(id) {
   fluidPage(
     card(
       min_height = "300px",
-      max_height = "300px",
+      max_height = "320px",
       card_header("Model Selection"),
       card_body(
         layout_column_wrap(
-          width = 3/4,
+          width = 1/2,
           verticalLayout(
             selectizeInput(
               ns("mlModel"),
