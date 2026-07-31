@@ -302,9 +302,7 @@ descriptiveStatsServer <- function(id, shared, load_spectral_data_memo) {
       
       validate(
         need(isTRUE(shared$render_tick > 0),
-             "Confirm your model choices to see descriptive statistics."),
-        need(!is.null(shared$modelType) && nzchar(shared$modelType),
-             "Please select a stratification method to see descriptive statistics.")
+             "Confirm your model choices to see descriptive statistics.")
       )
       
       datatable(displayed_stats(), options = list(dom = 't', pageLength = -1), rownames = FALSE)
