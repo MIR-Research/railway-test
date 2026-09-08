@@ -548,7 +548,7 @@ server <- function(input, output, session) {
       "static_models"      = "Static Models",
       "knn_model"          = "Customized Model",
       "train_model"        = "Build Your Own Model",
-      "sst"                = "Spectral Transformation"
+      "sst"                = "Spectral Transformation",
       NULL                 # ← for "home" show nothing
     )
     
