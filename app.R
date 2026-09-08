@@ -475,6 +475,13 @@ ui <- fluidPage(
         title = tagList(bs_icon("pc"), "Build Your Own Model"),
         modelTrainUI("model_training"),
         customModelUI("custom_model")
+      ),
+      
+      nav_panel(
+        value = "sst",
+        id = "sst",
+        title = tagList(bs_icon("shuffle"), "Spectral Transformation"),
+        sstUI("sst")
       )
     ),
     
@@ -541,6 +548,7 @@ server <- function(input, output, session) {
       "static_models"      = "Static Models",
       "knn_model"          = "Customized Model",
       "train_model"        = "Build Your Own Model",
+      "sst"                = "Spectral Transformation"
       NULL                 # ← for "home" show nothing
     )
     
@@ -856,6 +864,7 @@ server <- function(input, output, session) {
   extraction_methodsServer("extraction_methods", shared)
   homepageServer("home", shared)
   static_instructionsServer("static_instructions", shared)
+  sstServer("sst")
   
   # When user clicks on any "User Guide" button, send them home (where user guide is)
   observeEvent(shared$goto_user_guide, {
