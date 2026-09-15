@@ -146,11 +146,15 @@ read_bucket_model_rds <- function(object_key) {
 }
 
 load_bucket_keras_model <- function(object_key) {
-  tmp <- download_bucket_temp(object_key, ext = ".keras")
-
   # The CNN models in the bucket are legacy HDF5 files saved with a
   # ".keras" extension (confirmed via their file signature), not Keras 3
-  # native-format zip archives, so they must be loaded as HDF5.
+  # native-format zip archives. Keras's Python loader dispatches purely on
+  # file extension (".h5"/".hdf5" -> legacy HDF5 loader, ".keras" -> native
+  # zip-format loader), regardless of which R wrapper function is called
+  # (load_model_hdf5/load_model_tf both end up calling the same
+  # keras$models$load_model()). So the downloaded temp file must have a
+  # ".h5" extension for it to be read correctly.
+  tmp <- download_bucket_temp(object_key, ext = ".h5")
   keras::load_model_hdf5(tmp)
 }
 
