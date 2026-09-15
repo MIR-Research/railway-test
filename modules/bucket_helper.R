@@ -159,6 +159,25 @@ load_bucket_keras_model <- function(object_key) {
     if (file.exists(tmp)) file.size(tmp) else NA
   ))
 
+  # Diagnostic: Keras's "File not found" check runs in Python (via
+  # TensorFlow's gfile), not in R, so also check the same path from
+  # Python's own point of view. If Python/TensorFlow disagree with R
+  # about the file's existence, that confirms a filesystem-visibility
+  # mismatch between the R and Python processes rather than a download
+  # problem.
+  py_exists <- tryCatch(
+    reticulate::py_eval(sprintf("__import__('os').path.exists(r'%s')", tmp)),
+    error = function(e) paste("ERROR:", e$message)
+  )
+  tf_exists <- tryCatch(
+    reticulate::import("tensorflow")$io$gfile$exists(tmp),
+    error = function(e) paste("ERROR:", e$message)
+  )
+  print(sprintf(
+    "[CNN diagnostic] python os.path.exists=%s tf.io.gfile.exists=%s",
+    py_exists, tf_exists
+  ))
+
   keras::load_model_tf(tmp)
 }
 
