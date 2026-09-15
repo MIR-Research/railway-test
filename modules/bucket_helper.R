@@ -155,7 +155,13 @@ load_bucket_keras_model <- function(object_key) {
   # keras$models$load_model()). So the downloaded temp file must have a
   # ".h5" extension for it to be read correctly.
   tmp <- download_bucket_temp(object_key, ext = ".h5")
-  keras::load_model_hdf5(tmp)
+
+  # compile = FALSE: this app only ever calls predict() on these models, so
+  # the optimizer/loss/metrics don't need to be reconstructed. Skipping that
+  # avoids Keras 3's stricter deserializer choking on legacy metric
+  # references (e.g. "keras.metrics.mse") saved by the original Keras 2 /
+  # tf.keras training code.
+  keras::load_model_hdf5(tmp, compile = FALSE)
 }
 
 list_model_keys <- function(prefix, pattern = NULL) {
