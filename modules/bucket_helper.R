@@ -148,50 +148,10 @@ read_bucket_model_rds <- function(object_key) {
 load_bucket_keras_model <- function(object_key) {
   tmp <- download_bucket_temp(object_key, ext = ".keras")
 
-  # Diagnostic: confirm the download actually produced a usable file before
-  # handing it to Keras, since we've seen Keras report "File not found" for
-  # a path that download_bucket_temp() claimed to have written.
-  print(sprintf(
-    "[CNN diagnostic] object_key=%s tmp=%s exists=%s size=%s",
-    object_key,
-    tmp,
-    file.exists(tmp),
-    if (file.exists(tmp)) file.size(tmp) else NA
-  ))
-
-  # Diagnostic: Keras's "File not found" check runs in Python (via
-  # TensorFlow's gfile), not in R, so also check the same path from
-  # Python's own point of view. If Python/TensorFlow disagree with R
-  # about the file's existence, that confirms a filesystem-visibility
-  # mismatch between the R and Python processes rather than a download
-  # problem.
-  py_exists <- tryCatch(
-    reticulate::py_eval(sprintf("__import__('os').path.exists(r'%s')", tmp)),
-    error = function(e) paste("ERROR:", e$message)
-  )
-  tf_exists <- tryCatch(
-    reticulate::import("tensorflow")$io$gfile$exists(tmp),
-    error = function(e) paste("ERROR:", e$message)
-  )
-  print(sprintf(
-    "[CNN diagnostic] python os.path.exists=%s tf.io.gfile.exists=%s",
-    py_exists, tf_exists
-  ))
-
-  tryCatch({
-    keras::load_model_tf(tmp)
-  }, error = function(e) {
-    # Diagnostic: dump the actual Python-side traceback instead of just the
-    # final summarized error, since R/Python/TF all agree the file exists
-    # right before this call, so the real cause must be something other
-    # than a literal missing file.
-    print("[CNN diagnostic] load_model_tf failed; reticulate::py_last_error():")
-    print(tryCatch(
-      reticulate::py_last_error(),
-      error = function(e2) paste("py_last_error() itself failed:", e2$message)
-    ))
-    stop(e)
-  })
+  # The CNN models in the bucket are legacy HDF5 files saved with a
+  # ".keras" extension (confirmed via their file signature), not Keras 3
+  # native-format zip archives, so they must be loaded as HDF5.
+  keras::load_model_hdf5(tmp)
 }
 
 list_model_keys <- function(prefix, pattern = NULL) {
