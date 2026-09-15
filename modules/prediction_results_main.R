@@ -29,7 +29,7 @@ predictionResultsServer <- function(id, shared) {
         pageLength = 5,
         lengthMenu = c(5, 10, 25, 50, 100)
       ))
-    })
+    }, server = FALSE)
     
     output$table_title <- renderText({
       req(shared$selectedProperty)
