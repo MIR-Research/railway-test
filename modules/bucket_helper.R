@@ -147,6 +147,18 @@ read_bucket_model_rds <- function(object_key) {
 
 load_bucket_keras_model <- function(object_key) {
   tmp <- download_bucket_temp(object_key, ext = ".keras")
+
+  # Diagnostic: confirm the download actually produced a usable file before
+  # handing it to Keras, since we've seen Keras report "File not found" for
+  # a path that download_bucket_temp() claimed to have written.
+  print(sprintf(
+    "[CNN diagnostic] object_key=%s tmp=%s exists=%s size=%s",
+    object_key,
+    tmp,
+    file.exists(tmp),
+    if (file.exists(tmp)) file.size(tmp) else NA
+  ))
+
   keras::load_model_tf(tmp)
 }
 
