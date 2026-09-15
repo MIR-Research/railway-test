@@ -178,7 +178,20 @@ load_bucket_keras_model <- function(object_key) {
     py_exists, tf_exists
   ))
 
-  keras::load_model_tf(tmp)
+  tryCatch({
+    keras::load_model_tf(tmp)
+  }, error = function(e) {
+    # Diagnostic: dump the actual Python-side traceback instead of just the
+    # final summarized error, since R/Python/TF all agree the file exists
+    # right before this call, so the real cause must be something other
+    # than a literal missing file.
+    print("[CNN diagnostic] load_model_tf failed; reticulate::py_last_error():")
+    print(tryCatch(
+      reticulate::py_last_error(),
+      error = function(e2) paste("py_last_error() itself failed:", e2$message)
+    ))
+    stop(e)
+  })
 }
 
 list_model_keys <- function(prefix, pattern = NULL) {
