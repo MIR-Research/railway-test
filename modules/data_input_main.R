@@ -189,7 +189,11 @@ dataInputServer <- function(id, shared, load_spectral_data_memo) {
         x <- keras::array_reshape(x, c(nrow(x), ncol(x), 1))
         
         predictions <- tryCatch({
-          as.numeric(predict(shared$usedModel, x))
+          # shared$usedModel is a reticulate proxy for a Keras 3 Python
+          # object. R's predict() S3 dispatch only matches the older
+          # tf.keras class names (e.g. "keras.engine.training.Model"), which
+          # this object doesn't have, so call Python's predict() directly.
+          as.numeric(shared$usedModel$predict(x))
         }, error = function(e) {
           showNotification(paste("Error making predictions with CNN model:", e$message), type = "error")
           NULL
