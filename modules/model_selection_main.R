@@ -166,7 +166,21 @@ modelSelectionServer <- function(id, shared, soilPropertyName) {
       req(active)
       shared$modelType <- input$modelType
     }, ignoreNULL = FALSE)
-    
+
+    # Clear the stratification group name whenever modelType actually
+    # changes. Registered once (module-level state via prevModelType)
+    # instead of being recreated inside the big observer below, which
+    # used to leak a brand-new observer on every stratified selection.
+    prevModelType <- reactiveVal(NULL)
+    observeEvent(shared$modelType, {
+      req(active())
+      old <- prevModelType()
+      if (!is.null(old) && !identical(shared$modelType, old)) {
+        shared$selectedGroupName <- NULL
+      }
+      prevModelType(shared$modelType)
+    }, ignoreInit = TRUE)
+
     # -----------------------------------------------------------------
     # Confirm-choices gating
     # -----------------------------------------------------------------
@@ -482,16 +496,8 @@ modelSelectionServer <- function(id, shared, soilPropertyName) {
             shared$selectedGroupName <- NULL
           }
         }
-        oldmodelType <- shared$modelType
         print(paste0("Group Name:", shared$selectedGroupName))
-        
-        observeEvent(shared$modelType, {
-          if (shared$modelType != oldmodelType) {
-            shared$selectedGroupName <- NULL
-          }
-        })
-        
-        
+
         # Disable PCA plot if the model is CNN or PLS
         if (shared$mlModel != "PLS" && shared$mlModel != "CNN") {
           # Load PCA model if applicable
