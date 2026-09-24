@@ -34,6 +34,8 @@ extraction_methodsServer <- function(id, shared) {
       CEC        = "CEC, NH4OAc, pH 7.0, 2M KCl displacement",
       K          = "Potassium, NH4OAc Extractable, 2M KCl displacement",
       C_hpom     = "Carbon, hpom",
+      hpom       = "Carbon, hpom",
+      maom       = "Carbon, hmin, S Prep",   # MAOM = <53 micron (hmin) fraction
       Sand       = "Sand, Total",
       Silt       = "Silt, Total",
       ESOC       = "Estimated Organic Carbon, Total C, S prep",
@@ -58,6 +60,8 @@ extraction_methodsServer <- function(id, shared) {
       CEC        = "4B1a1a2a1",
       K          = "4B1a1c1",
       C_hpom     = "6A4a1a1-3a1",
+      hpom       = "6A4a1a1-3a1",
+      maom       = "6A4a1a1-3a3",
       Sand       = "3A1a1",
       Silt       = "3A1a1",
       ESOC       = NA_character_,           # calculated; not in manual as a single code
@@ -78,14 +82,20 @@ extraction_methodsServer <- function(id, shared) {
       tolower(x)
     }
     
+    # Safe lookup: returns NULL for unknown codes instead of erroring
+    # ([[ on a missing name throws "subscript out of bounds")
+    lookup <- function(tbl, code) {
+      if (code %in% names(tbl)) tbl[[code]] else NULL
+    }
+
     analyte_name <- reactive({
       code <- req(shared$extraction_method)
-      property_lookup[[code]]
+      lookup(property_lookup, code)
     })
-    
+
     pdf_file <- reactive({
       code <- req(shared$extraction_method)
-      pdf_lookup[[code]]
+      lookup(pdf_lookup, code)
     })
     
     extraction_methods <- reactive({
@@ -96,11 +106,12 @@ extraction_methodsServer <- function(id, shared) {
                     "Analyte_Code", "Detection_limit")
       
       # Primary: match by analyte_name (robust string compare)
-      rows <- dat[norm(dat$analyte_name) == norm(nm), sel_cols, drop = FALSE]
-      
+      rows <- if (is.null(nm)) dat[0, sel_cols, drop = FALSE] else
+        dat[norm(dat$analyte_name) == norm(nm), sel_cols, drop = FALSE]
+
       # Fallback: match by Analyte_Code mapping if name match failed
       if (nrow(rows) == 0) {
-        acode <- analyte_code_lookup[[code]]
+        acode <- lookup(analyte_code_lookup, code)
         if (!is.null(acode) && !is.na(acode)) {
           rows <- subset(dat, Analyte_Code == acode, select = sel_cols)
         }
