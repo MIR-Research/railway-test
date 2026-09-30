@@ -158,32 +158,48 @@ dataInputServer <- function(id, shared, load_spectral_data_memo) {
       # If PLS, do the *exact* PCA code
       #-------------------------------------
       if (shared$mlModel == "PLS") {
+        # PLS models don't use PCA, so show a placeholder instead of a PCA
+        # plot. Setting it first also clears any plot left over from a
+        # previous prediction with a different model.
+        shared$pcaPlot <- ggplot() + theme_void() +
+          annotate("text", x = 0.5, y = 0.5, label = "PCA plot not available for PLS models")
+
         # Make predictions
         predictions <- round(predict(model_choice, newdata = df), 2)
-        
+
         if (is.null(predictions)) {
           showNotification("Error making predictions", type = "error")
           return()
         } else {
           showNotification("Predictions made Successfully", type = "message")
         }
-        
-        # Build the PCA plot using the exact snippet approach
-        if (is.null(shared$selectedProperty)) {
-          # fallback if no property chosen
-          shared$pcaPlot <- ggplot() + theme_void() +
-            annotate("text", x=0.5, y=0.5, label="No property selected")
-        } else {
-          pca_plot <- doPLSPCA(shared$selectedProperty, df)
-          if (is.null(pca_plot)) {
-            shared$pcaPlot <- ggplot() + theme_void() +
-              annotate("text", x=0.5, y=0.5, label="Error producing PCA.")
-          } else {
-            shared$pcaPlot <- pca_plot
-          }
-        }
-        
+
+        # Disabled: this built a separate display-only PCA of the calibration
+        # data plus the user's samples (doPLSPCA() above, kept for reference).
+        # Note if re-enabling: doPLSPCA() reads the spectra from columns
+        # 38:1792 (1755 columns) but names them with 1765 wavenumbers, so the
+        # calibration spectra were misaligned by 10 columns (~19 cm^-1). The
+        # other modules use columns 28:1792.
+        # # Build the PCA plot using the exact snippet approach
+        # if (is.null(shared$selectedProperty)) {
+        #   # fallback if no property chosen
+        #   shared$pcaPlot <- ggplot() + theme_void() +
+        #     annotate("text", x=0.5, y=0.5, label="No property selected")
+        # } else {
+        #   pca_plot <- doPLSPCA(shared$selectedProperty, df)
+        #   if (is.null(pca_plot)) {
+        #     shared$pcaPlot <- ggplot() + theme_void() +
+        #       annotate("text", x=0.5, y=0.5, label="Error producing PCA.")
+        #   } else {
+        #     shared$pcaPlot <- pca_plot
+        #   }
+        # }
+
       } else if (shared$mlModel == "CNN") {
+        # CNN models don't use PCA either; same placeholder as PLS.
+        shared$pcaPlot <- ggplot() + theme_void() +
+          annotate("text", x = 0.5, y = 0.5, label = "PCA plot not available for CNN models")
+
         # reshape to (batch, n_features, 1)
         x <- as.matrix(df)
         x <- keras::array_reshape(x, c(nrow(x), ncol(x), 1))
@@ -224,7 +240,7 @@ dataInputServer <- function(id, shared, load_spectral_data_memo) {
         return(invisible(NULL))    # <-- we're done for the CNN case
         
         
-        # Do not assign shared$pcaPlot for CNN models
+        # (The PCA card gets a placeholder at the start of the CNN branch.)
       } else {  # Existing logic for non-PLS, non-CNN models
         # All other models use the previously loaded PCA (shared$usedPCA)
         pca_model <- shared$usedPCA
