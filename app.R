@@ -114,7 +114,7 @@ soilProperties <- list(
   "Total Carbon"             = "TC",
   "Estimated Organic Carbon" = "ESOC",
   # "Carbon (hmin)"            = "Carbon_hmin",
-  "Organic Carbon" = "SOC",
+  # "Organic Carbon" = "SOC",
   "Carbon (pom)" = "C_pom",
   "Carbon (hpom)"            = "hpom",
   "Carbon (maom)" = "maom",

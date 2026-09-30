@@ -33,8 +33,12 @@ calibration_cache <- cachem::cache_layered(
                      write_fn = function(value, file) saveRDS(value, file, compress = FALSE))
 )
 
+# Property codes whose data file has a different name. Everything else is
+# spectral_data/<code>.txt.
 spectral_object_key <- function(property) {
-  file <- switch(property, P_Mehlich3 = "P_Mehlich", property)
+  file <- switch(property,
+                 P_Mehlich3 = "P_Mehlich",
+                 property)
   bucket_key("spectral_data", paste0(file, ".txt"))
 }
 
