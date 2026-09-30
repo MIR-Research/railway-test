@@ -164,6 +164,38 @@ load_bucket_keras_model <- function(object_key) {
   keras::load_model_hdf5(tmp, compile = FALSE)
 }
 
+# ---- In-memory model cache ---------------------------------------------------
+# Model files in the bucket never change, so after the first download we keep
+# them in memory. The cache is shared by every session in this R process and
+# evicts the least-recently-used model once it passes MODEL_CACHE_MB.
+# Errors (e.g. a missing file) are not cached, so a retry hits the bucket again.
+model_cache_mb <- as.numeric(Sys.getenv("MODEL_CACHE_MB", "1024"))
+
+read_bucket_rds_cached <- memoise::memoise(
+  read_bucket_rds,
+  cache = cachem::cache_mem(max_size = model_cache_mb * 1024^2)
+)
+
+# Keras models are Python objects, so object.size() can't see their real
+# memory use; cap them by count instead of bytes.
+load_bucket_keras_model_cached <- memoise::memoise(
+  load_bucket_keras_model,
+  cache = cachem::cache_mem(max_n = 10)
+)
+
+# Load a model with one of the cached loaders above, returning NULL instead
+# of erroring when the object is missing or unreadable. This replaces the
+# old bucket_object_exists() check, which cost an extra LIST request per load.
+try_load_model <- function(loader, object_key) {
+  tryCatch(
+    loader(object_key),
+    error = function(e) {
+      message("Model load failed for: ", object_key, " | ", conditionMessage(e))
+      NULL
+    }
+  )
+}
+
 list_model_keys <- function(prefix, pattern = NULL) {
   keys <- list_bucket_keys(prefix)
   

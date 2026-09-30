@@ -384,52 +384,42 @@ modelSelectionServer <- function(id, shared, soilPropertyName) {
         
         if (shared$mlModel == "PLS") {
           model_file <- bucket_key(model_prefixes(), paste0(id, "_pls_model.rds"))
-          if (bucket_object_exists(model_file)) {
+          shared$usedModel <- try_load_model(read_bucket_rds_cached, model_file)
+          if (!is.null(shared$usedModel)) {
             showNotification("Loaded PLS model file", type = "message")
-            shared$usedModel <- read_bucket_rds(model_file)
           } else {
             showNotification("PLS model file not found", type = "warning")
-            shared$usedModel <- NULL
           }
-        } 
+        }
         else if (shared$mlModel == "CNN") {
           # Loading CNN model using Keras
           model_file <- bucket_key(model_prefixes(), paste0(id, "_CNN_model.keras"))
-          if (bucket_object_exists(model_file)) {
+          shared$usedModel <- try_load_model(load_bucket_keras_model_cached, model_file)
+          if (!is.null(shared$usedModel)) {
             showNotification("Loaded CNN model file", type = "message")
-            shared$usedModel <- tryCatch({
-              load_bucket_keras_model(model_file)
-            }, error = function(e) {
-              print(e$message)
-              showNotification(paste("Error loading CNN model:", e$message), type = "error")
-              NULL
-            })
           } else {
-            showNotification("CNN model file not found", type = "warning")
-            shared$usedModel <- NULL
+            showNotification("CNN model file not found or could not be loaded", type = "warning")
           }
         }
         else {
           # Load other models
           model_file <- bucket_key(model_prefixes(), paste0(id, "_", find_model(), "_model.rds"))
           print(model_file)
-          if (bucket_object_exists(model_file)) {
+          shared$usedModel <- try_load_model(read_bucket_rds_cached, model_file)
+          if (!is.null(shared$usedModel)) {
             showNotification("Loaded model file", type = "message")
-            shared$usedModel <- read_bucket_rds(model_file)
           } else {
             showNotification("Model file not found", type = "warning")
-            shared$usedModel <- NULL
           }
         }
-        
+
         # Disable PCA plot if the model is CNN or PLS
         if (shared$mlModel != "PLS" && shared$mlModel != "CNN") {
           pca_model_file <- bucket_key(model_prefixes(), paste0(id, "_pca", ".rds"))
-          if (bucket_object_exists(pca_model_file)) {
+          shared$usedPCA <- try_load_model(read_bucket_rds_cached, pca_model_file)
+          if (!is.null(shared$usedPCA)) {
             showNotification("PCA model found and loaded", type = "message")
-            shared$usedPCA <- read_bucket_rds(pca_model_file)
           } else {
-            shared$usedPCA <- NULL
             showNotification("PCA model file not found", type = "warning")
           }
         } else {
@@ -447,31 +437,21 @@ modelSelectionServer <- function(id, shared, soilPropertyName) {
           model_file <- model_input_value
           print(model_file)
           
-          if (bucket_object_exists(model_file)) {
+          shared$usedModel <- try_load_model(load_bucket_keras_model_cached, model_file)
+          if (!is.null(shared$usedModel)) {
             showNotification("Loaded CNN model file", type = "message")
-            shared$usedModel <- tryCatch({
-              load_bucket_keras_model(model_file)
-            }, error = function(e) {
-              showNotification(paste("Error loading CNN model:", e$message), type = "error")
-              NULL
-            })
           } else {
-            showNotification("CNN model file not found", type = "warning")
-            shared$usedModel <- NULL
+            showNotification("CNN model file not found or could not be loaded", type = "warning")
           }
-          
+
           # CNN models don't use a PCA companion
           shared$usedPCA <- NULL
-          
+
         } else {
           # Load the selected RDS model
           model_file <- model_input_value
-          if (bucket_object_exists(model_file)) {
-            shared$usedModel <- read_bucket_rds(model_file)
-            print(shared$usedModel)
-          } else {
-            shared$usedModel <- NULL
-          }
+          shared$usedModel <- try_load_model(read_bucket_rds_cached, model_file)
+          print(shared$usedModel)
         }
         
         
@@ -502,12 +482,11 @@ modelSelectionServer <- function(id, shared, soilPropertyName) {
         if (shared$mlModel != "PLS" && shared$mlModel != "CNN") {
           # Load PCA model if applicable
           pca_model_file <- gsub(paste0(find_model(), "_model"), "pca", model_input_value)
-          if (bucket_object_exists(pca_model_file)) {
-            shared$usedPCA <- read_bucket_rds(pca_model_file)
+          shared$usedPCA <- try_load_model(read_bucket_rds_cached, pca_model_file)
+          if (!is.null(shared$usedPCA)) {
             showNotification("PCA model found and loaded", type = "message")
             print(pca_model_file)
           } else {
-            shared$usedPCA <- NULL
             showNotification("PCA model file not found", type = "warning")
           }
         } else {

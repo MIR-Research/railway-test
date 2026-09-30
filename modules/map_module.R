@@ -23,14 +23,22 @@ mapServer <- function(id, shared, fs_cache, load_map_data_memo) {
     original_data <- reactive({
       req(shared$selectedProperty)
       
-      df <- load_map_data_memo(shared$selectedProperty)
-      
-      
-      if (is.null(df)) {
+      # Full_DFs/<property>.txt is identical to spectral_data/<property>.txt,
+      # so use the metadata from the shared calibration bundle (see
+      # calibration_data.R) instead of downloading a second copy.
+      bundle <- load_calibration(shared$selectedProperty)
+
+      if (is.null(bundle)) {
         showNotification(paste("Map data file not found for", shared$selectedProperty), type = "error")
+        return(NULL)
       }
-      
-      df
+
+      # Same filtering load_map_data_memo() did: drop rows without
+      # coordinates, then keep one row per site.
+      df <- bundle$meta
+      df <- df[complete.cases(df[, c("latitude_std_decimal_degrees",
+                                     "longitude_std_decimal_degrees")]), ]
+      dplyr::distinct(df, lims_site_id, .keep_all = TRUE)
     })
 
     # Reactive to filter the original data based on shared$modelType and shared$selectedGroupName.

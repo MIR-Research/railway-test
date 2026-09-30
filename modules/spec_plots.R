@@ -18,36 +18,17 @@ specPlotsUI <- function(id) {
 specPlotsServer <- function(id, shared, fs_cache, load_spectral_data_memo) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
-    # Perma cache version
-    preprocess_spectra_memo <- memoise(function(spec_data, property) {
-      # Same code as before
-      spec_data_trimmed <- spec_data[, 28:1792]
-      
-      spec_matrix <- as.matrix(spec_data_trimmed)
-      colnames(spec_matrix) <- seq(from = 4000, by = -1.927, length.out = ncol(spec_matrix))
-      
-      # Apply transformations
-      spec_sg <- prospectr::savitzkyGolay(spec_matrix, m = 0, w = 13, p = 2)
-      wav <- as.numeric(colnames(spec_sg))
-      new_wav <- seq(4000, 600, by = -10)
-      mir_res <- prospectr::resample(spec_sg, wav, new_wav)
-      colnames(mir_res) <- new_wav
-      mir_snv <- prospectr::standardNormalVariate(mir_res)
-      mir_snv
-    }, cache = fs_cache)
-    
+    # The calibration spectra, already preprocessed (Savitzky-Golay ->
+    # resample to 10 cm^-1 -> SNV), come from the shared calibration bundle
+    # (see calibration_data.R), so this module no longer preprocesses them.
     processed_data <- reactive({
       req(shared$selectedProperty)
-      # Use the memoized preprocessing
-      spec_data <- load_spectral_data_memo(shared$selectedProperty)
-      if (is.null(spec_data)) {
+      bundle <- load_calibration(shared$selectedProperty)
+      if (is.null(bundle)) {
         showNotification(paste("No data for", shared$selectedProperty), type = "error")
         return(NULL)
       }
-      
-      # Use the memoized preprocessing
-      processed <- preprocess_spectra_memo(spec_data, shared$selectedProperty)
-      processed
+      bundle$snv
     })
     
     output$spec_plot <- renderPlot({

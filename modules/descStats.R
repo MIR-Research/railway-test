@@ -176,7 +176,10 @@ descriptiveStatsServer <- function(id, shared, load_spectral_data_memo) {
     
     base_data <- reactive({
       req(shared$selectedProperty)
-      df <- load_spectral_data_memo(shared$selectedProperty)
+      # Stats only need the metadata columns, so use the shared
+      # calibration bundle (see calibration_data.R) instead of the raw file.
+      bundle <- load_calibration(shared$selectedProperty)
+      df <- if (is.null(bundle)) NULL else bundle$meta
       if (is.null(df) || nrow(df) == 0) return(data.frame())
       if (!"calc_value" %in% names(df)) return(data.frame())
       
