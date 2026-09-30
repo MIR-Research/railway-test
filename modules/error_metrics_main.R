@@ -66,6 +66,30 @@ rename_strat_column <- function(df, category) {
   df
 }
 
+# TRUE for metric rows that belong to property code `prop`. A row belongs
+# when its filename is the code itself (e.g. "C_hpom") or starts with the
+# code plus "_" (e.g. "hpom_Final", "TC_Mollisols"). This replaces a plain
+# substring match, which also caught other properties whose names contain
+# the code ("hpom" matched the old "C_hpom" rows, "C_pom" matched
+# "C_pom_mineral"). Rows belonging to a longer property code that starts
+# with this one are excluded, using the property list in app.R.
+# Property codes whose metric rows are named differently from the tab code.
+metric_name_aliases <- c(P_Mehlich3 = "P_Mehlich")
+
+metric_rows_for_property <- function(filenames, prop) {
+  if (prop %in% names(metric_name_aliases)) prop <- metric_name_aliases[[prop]]
+  fn <- tolower(trimws(filenames))
+  p  <- tolower(prop)
+  belongs_to <- function(code) fn == code | startsWith(fn, paste0(code, "_"))
+
+  keep <- belongs_to(p)
+  all_codes <- if (exists("soilProperties")) tolower(unlist(soilProperties)) else character(0)
+  for (longer in all_codes[startsWith(all_codes, paste0(p, "_"))]) {
+    keep <- keep & !belongs_to(longer)
+  }
+  keep & !is.na(keep)
+}
+
 # Reads the error-metric CSVs from the bucket.
 #
 # For every stratification category and ML model we build the bucket
@@ -259,7 +283,10 @@ errorMetricsServer <- function(id, shared) {
       
       prop <- shared$selectedProperty
       if (!is.null(prop) && prop != "") {
-        df <- df[grepl(prop, df$filename, ignore.case = TRUE), ]
+        # Old substring match; also showed other properties' rows (see
+        # metric_rows_for_property() above).
+        # df <- df[grepl(prop, df$filename, ignore.case = TRUE), ]
+        df <- df[metric_rows_for_property(df$filename, prop), ]
       }
       
       df
