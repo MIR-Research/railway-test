@@ -27,45 +27,147 @@ errorMetricsUI <- function(id) {
   )
 }
 
+# ---- Loading the metric CSVs (shared by all sessions) -----------------------
+# These live outside errorMetricsServer so every user session shares one
+# cached copy instead of each session re-reading every CSV from the bucket.
+
+# Bucket prefixes (these are object-key prefixes in the bucket,
+# NOT local paths). They mirror the mapping used in model_selection_main.R.
+error_metric_prefixes <- list(
+  "Order"   = "models/Orders",
+  "Global"  = "models/Global",
+  "Texture" = "models/Texture_classes",
+  "Depth"   = "models/Depths",
+  "MLRA"    = "models/MLRA",
+  "LULC"    = "models/LULC"
+)
+
+uncertainty_prefixes <- list(
+  "Order"   = "Uncertainty_vals/Orders",
+  "Global"  = "Uncertainty_vals/Global",
+  "Texture" = "Uncertainty_vals/Texture_classes",
+  "Depth"   = "Uncertainty_vals/Depths",
+  "MLRA"    = "Uncertainty_vals/MLRA",
+  "LULC"    = "Uncertainty_vals/LULC"
+)
+
+error_metric_ml_models <- c("Cubist", "PLS", "RF", "SVM", "CNN")
+
+rename_strat_column <- function(df, category) {
+  if (category == "Global") {
+    df$strat <- "Global"
+  } else if (category %in% names(df)) {
+    names(df)[names(df) == category] <- "strat"
+  } else {
+    df$strat <- NA_character_
+  }
+
+  df$strat <- as.character(df$strat)
+  df
+}
+
+# Reads the error-metric CSVs from the bucket.
+#
+# For every stratification category and ML model we build the bucket
+# prefix (e.g. "models/Orders/RF"), list the objects under it, keep the
+# .csv keys, and read each one straight out of the bucket. This replaces
+# the old local-filesystem approach (dir.exists / list.files / read.csv)
+# that only worked when the model folders were present on disk.
+collect_error_csvs <- function(mapping, include_uncertainty = FALSE) {
+  all_dfs <- list()
+
+  for (category in names(mapping)) {
+    base_dir <- mapping[[category]]
+
+    for (ml_model in error_metric_ml_models) {
+      # Bucket-key prefix for this category + model, using the same
+      # helper model_selection_main.R uses to build object keys.
+      prefix <- bucket_key(base_dir, ml_model)
+
+      # List everything under the prefix. If the prefix doesn't exist
+      # (or listing fails), treat it as empty and move on.
+      keys <- tryCatch(
+        list_model_keys(prefix),
+        error = function(e) character(0)
+      )
+      if (length(keys) == 0) next
+
+      # Keep only CSV objects.
+      csv_files <- keys[grepl("\\.csv$", basename(keys), ignore.case = TRUE)]
+      if (length(csv_files) == 0) next
+
+      # Split uncertainty vs. regular error files by filename.
+      if (include_uncertainty) {
+        # Previously loaded both the summary files and the run-level files
+        # (one row per training run). The run-level rows were then dropped in
+        # compileAllUncertaintySD(), so we now skip downloading them. To load
+        # them again (e.g. to show per-run values), swap these two lines back.
+        # csv_files <- csv_files[grepl("uncertainty", basename(csv_files), ignore.case = TRUE)]
+        csv_files <- csv_files[grepl("uncertainty", basename(csv_files), ignore.case = TRUE) &
+                               grepl("summary", basename(csv_files), ignore.case = TRUE)]
+      } else {
+        csv_files <- csv_files[!grepl("uncertainty", basename(csv_files), ignore.case = TRUE)]
+      }
+
+      if (length(csv_files) == 0) next
+
+      for (f in csv_files) {
+        # Read the CSV directly from the bucket. read_bucket_delim is the
+        # same reader main.R uses for the Full_DFs / spectral_data objects.
+        df <- tryCatch(
+          as.data.frame(read_bucket_delim(f, delim = ",")),
+          error = function(e) NULL
+        )
+        if (is.null(df) || nrow(df) == 0) next
+
+        df$ModelType  <- category
+        df$ML_Model   <- ml_model
+        df$SourceFile <- basename(f)
+        df <- rename_strat_column(df, category)
+
+        if (include_uncertainty) {
+          df$FileKind <- if (grepl("summary", basename(f), ignore.case = TRUE)) {
+            "Summary Matrix"
+          } else {
+            "Run-level Values"
+          }
+        }
+
+        all_dfs[[length(all_dfs) + 1]] <- df
+      }
+    }
+  }
+
+  if (length(all_dfs) == 0) data.frame() else dplyr::bind_rows(all_dfs)
+}
+
+# Cache the combined CSVs in memory for all sessions. Entries expire after
+# ERROR_METRICS_CACHE_HOURS (default 12) so newly uploaded metrics appear
+# without a redeploy. An empty result raises an error instead of returning,
+# because memoise doesn't cache errors: if the bucket was unreachable, the
+# next person to open the modal retries rather than getting a cached blank.
+error_metrics_cache_hours <- as.numeric(Sys.getenv("ERROR_METRICS_CACHE_HOURS", "12"))
+
+collect_error_csvs_cached <- memoise::memoise(function(mapping, include_uncertainty) {
+  df <- collect_error_csvs(mapping, include_uncertainty)
+  if (nrow(df) == 0) stop("no metric CSVs could be read from the bucket")
+  df
+}, cache = cachem::cache_mem(max_age = error_metrics_cache_hours * 3600))
+
+collect_error_csvs_shared <- function(mapping, include_uncertainty = FALSE) {
+  tryCatch(
+    collect_error_csvs_cached(mapping, include_uncertainty),
+    error = function(e) {
+      message("Error metrics load failed | ", conditionMessage(e))
+      data.frame()
+    }
+  )
+}
+
 # Server function for error metrics module
 errorMetricsServer <- function(id, shared) {
   moduleServer(id, function(input, output, session) {
-    
-    # Bucket prefixes (these are object-key prefixes in the bucket,
-    # NOT local paths). They mirror the mapping used in model_selection_main.R.
-    dir_mapping <- list(
-      "Order"   = "models/Orders",
-      "Global"  = "models/Global",
-      "Texture" = "models/Texture_classes",
-      "Depth"   = "models/Depths",
-      "MLRA"    = "models/MLRA",
-      "LULC"    = "models/LULC"
-    )
-    
-    uncert_dir_mapping <- list(
-      "Order"   = "Uncertainty_vals/Orders",
-      "Global"  = "Uncertainty_vals/Global",
-      "Texture" = "Uncertainty_vals/Texture_classes",
-      "Depth"   = "Uncertainty_vals/Depths",
-      "MLRA"    = "Uncertainty_vals/MLRA",
-      "LULC"    = "Uncertainty_vals/LULC"
-    )
-    
-    ml_models <- c("Cubist", "PLS", "RF", "SVM", "CNN")
-    
-    rename_strat_column <- function(df, category) {
-      if (category == "Global") {
-        df$strat <- "Global"
-      } else if (category %in% names(df)) {
-        names(df)[names(df) == category] <- "strat"
-      } else {
-        df$strat <- NA_character_
-      }
-      
-      df$strat <- as.character(df$strat)
-      df
-    }
-    
+
     format_metric <- function(value, sd) {
       ifelse(
         is.na(value),
@@ -78,77 +180,8 @@ errorMetricsServer <- function(id, shared) {
       )
     }
     
-    # Reads the error-metric CSVs from the bucket.
-    #
-    # For every stratification category and ML model we build the bucket
-    # prefix (e.g. "models/Orders/RF"), list the objects under it, keep the
-    # .csv keys, and read each one straight out of the bucket. This replaces
-    # the old local-filesystem approach (dir.exists / list.files / read.csv)
-    # that only worked when the model folders were present on disk.
-    collect_csvs <- function(mapping, include_uncertainty = FALSE) {
-      all_dfs <- list()
-      
-      for (category in names(mapping)) {
-        base_dir <- mapping[[category]]
-        
-        for (ml_model in ml_models) {
-          # Bucket-key prefix for this category + model, using the same
-          # helper model_selection_main.R uses to build object keys.
-          prefix <- bucket_key(base_dir, ml_model)
-          
-          # List everything under the prefix. If the prefix doesn't exist
-          # (or listing fails), treat it as empty and move on.
-          keys <- tryCatch(
-            list_model_keys(prefix),
-            error = function(e) character(0)
-          )
-          if (length(keys) == 0) next
-          
-          # Keep only CSV objects.
-          csv_files <- keys[grepl("\\.csv$", basename(keys), ignore.case = TRUE)]
-          if (length(csv_files) == 0) next
-          
-          # Split uncertainty vs. regular error files by filename.
-          if (include_uncertainty) {
-            csv_files <- csv_files[grepl("uncertainty", basename(csv_files), ignore.case = TRUE)]
-          } else {
-            csv_files <- csv_files[!grepl("uncertainty", basename(csv_files), ignore.case = TRUE)]
-          }
-          
-          if (length(csv_files) == 0) next
-          
-          for (f in csv_files) {
-            # Read the CSV directly from the bucket. read_bucket_delim is the
-            # same reader main.R uses for the Full_DFs / spectral_data objects.
-            df <- tryCatch(
-              as.data.frame(read_bucket_delim(f, delim = ",")),
-              error = function(e) NULL
-            )
-            if (is.null(df) || nrow(df) == 0) next
-            
-            df$ModelType  <- category
-            df$ML_Model   <- ml_model
-            df$SourceFile <- basename(f)
-            df <- rename_strat_column(df, category)
-            
-            if (include_uncertainty) {
-              df$FileKind <- if (grepl("summary", basename(f), ignore.case = TRUE)) {
-                "Summary Matrix"
-              } else {
-                "Run-level Values"
-              }
-            }
-            
-            all_dfs[[length(all_dfs) + 1]] <- df
-          }
-        }
-      }
-      
-      if (length(all_dfs) == 0) data.frame() else dplyr::bind_rows(all_dfs)
-    }
-    
     compileAllErrors <- reactive({
-      df <- collect_csvs(dir_mapping, include_uncertainty = FALSE)
+      df <- collect_error_csvs_shared(error_metric_prefixes, include_uncertainty = FALSE)
       if (nrow(df) == 0) return(df)
       
       req_cols <- c("filename", "R2.val", "RMSE.val", "RPIQ.val", "RPD.val")
@@ -168,7 +201,7 @@ errorMetricsServer <- function(id, shared) {
     })
     
     compileAllUncertaintySD <- reactive({
-      df <- collect_csvs(uncert_dir_mapping, include_uncertainty = TRUE)
+      df <- collect_error_csvs_shared(uncertainty_prefixes, include_uncertainty = TRUE)
       if (nrow(df) == 0) return(df)
       
       df <- df[df$FileKind == "Summary Matrix", , drop = FALSE]
