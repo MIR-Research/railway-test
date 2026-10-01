@@ -9,13 +9,29 @@ library(prospectr)
 library(FNN)
 library(ggplot2)
 library(DT)
-pca_dir <- "pretrained_pca"
+# Old version: read from a local pretrained_pca/ folder, which isn't in the
+# repo or the Docker image, and kept every loaded file in memory.
+# pca_dir <- "pretrained_pca"
+#
+# get_pretrained_pca <- memoise(function(prop) {
+#   path <- file.path(pca_dir, paste0("pca_", prop, ".rds"))
+#   if (!file.exists(path)) stop("No pretrained PCA for soil property: ", prop)
+#   readRDS(path)
+# })
 
-get_pretrained_pca <- memoise(function(prop) {
-  path <- file.path(pca_dir, paste0("pca_", prop, ".rds"))
-  if (!file.exists(path)) stop("No pretrained PCA for soil property: ", prop)
-  readRDS(path)
-})
+# Reads pretrained_pca/pca_<prop>.rds from the bucket through the shared
+# model cache (bucket_helper.R). It shares that cache's MODEL_CACHE_MB limit
+# with the models rather than adding a separate one, and the least-recently
+# used file is dropped first when the limit is reached.
+get_pretrained_pca <- function(prop) {
+  object_key <- bucket_key("pretrained_pca", paste0("pca_", prop, ".rds"))
+  tryCatch(
+    read_bucket_rds_cached(object_key),
+    error = function(e) {
+      stop("No pretrained PCA for soil property: ", prop, " (", conditionMessage(e), ")")
+    }
+  )
+}
 # knn_models.R
 
 source("modules/extraction_methods.R")
