@@ -798,7 +798,10 @@ knnServer <- function(id, shared, load_spectral_data_memo) {
               return(NULL)
             })
           } else if (input$modelType == "cnn") {
-            predictor_cols <- setdiff(names(user_data()), "scan_path_name")
+            # First column is the sample ID, whatever it's named
+            # ("scan_path_name" from Data Preprocessing, "SampleID" from
+            # Spectral Transformation); the rest are the spectra.
+            predictor_cols <- names(user_data())[-1]
             user_matrix <- tryCatch({
               as.matrix(user_data()[, predictor_cols, drop = FALSE])
             }, error = function(e) {
@@ -823,7 +826,9 @@ knnServer <- function(id, shared, load_spectral_data_memo) {
           
           incProgress(0.1, detail = "Finishing up...")
           pred_df <- tryCatch({
-            data.frame("Sample Name" = user_data()[["scan_path_name"]], Prediction = preds)
+            # Sample IDs come from the first column, whatever it's named
+            # (same approach as the Static Models page).
+            data.frame("Sample Name" = user_data()[[1]], Prediction = preds)
           }, error = function(e) {
             showNotification(paste("Error building predictions dataframe:", e$message), type = "error")
             return(NULL)
