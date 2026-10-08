@@ -343,6 +343,9 @@ ui <- fluidPage(
   "))
   ),
   
+  # "Messages" tab (bottom-left) listing this session's errors and warnings
+  messageLogUI("message_log"),
+
   # UI for zoom functionality
   absolutePanel(
     id = "fontSizer", top = 70, right = 20, width = "auto",
@@ -522,6 +525,9 @@ ui <- fluidPage(
 
 
 server <- function(input, output, session) {
+  # Start first so errors/warnings from every other module get logged
+  messageLogServer("message_log")
+
   options(shiny.maxRequestSize = 500 * 1024^2)
   
   shinyjs::addClass(id = "page_navbar", class = "navbar-right")
