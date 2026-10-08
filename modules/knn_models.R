@@ -724,6 +724,7 @@ knnServer <- function(id, shared, load_spectral_data_memo) {
           })
           
           incProgress(0.1, detail = "Training model and making predictions...")
+          ensure_training_cluster()   # parallel workers healthy (parallel_training.R)
           # Train the model based on the selected model type.
           modelResult <- switch(input$modelType,
                                 "rf"  = train_rf(trainData, res_var),

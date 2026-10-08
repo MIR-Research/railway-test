@@ -959,6 +959,7 @@ modelTrainingServer <- function(id, shared, load_spectral_data_memo) {
               pca_obj   <- NULL
               
               incProgress(0.6, detail = "Running training...")
+              ensure_training_cluster()   # parallel workers healthy (parallel_training.R)
               
               doPCA <- if(shared$trainType == "Partial Least Squares") {
                 FALSE 
