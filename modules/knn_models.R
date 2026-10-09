@@ -32,6 +32,205 @@ get_pretrained_pca <- function(prop) {
     }
   )
 }
+# ---- Training + prediction (runs in a background process) -------------------
+#
+# Trains the chosen model on the selected calibration neighbours, computes the
+# internal calibration metrics and predicts the user's samples. It is sent to
+# a background R process (background_tasks.R), which has none of the app's
+# other functions, so everything it needs is defined inside it, loaded with
+# library() or passed in as an argument. It never calls showNotification():
+# it returns list(ok = TRUE, ...) on success or list(ok = FALSE, error = ...)
+# with the message to show, and the app displays the result.
+#
+#   train_data   : data.frame of preprocessed spectra + calc_value
+#   user_matrix  : user spectra in the pretrained-PCA column order
+#                  (used by the PCA-based models and PLS)
+#   user_spectra : all user spectral columns (used by CNN)
+#   model_type   : "rf", "svm", "cb", "pls" or "cnn"
+knn_train_and_predict <- function(train_data, user_matrix, user_spectra, model_type,
+                                  res_var = "calc_value") {
+  suppressPackageStartupMessages(library(caret))
+  if (model_type == "cnn") suppressPackageStartupMessages(library(keras))
+  # Use this process's parallel workers if it has them (parallel_training.R)
+  if (exists("ensure_training_cluster", mode = "function")) ensure_training_cluster()
+
+  fail <- function(msg) list(ok = FALSE, error = msg)
+  retry_hint <- " try increasing distance or number of neighbors."
+
+  # PCA (99% variance) then caret::train, as used by RF, SVM and Cubist
+  train_on_pca <- function(trainData, method, ...) {
+    X <- trainData[, !(names(trainData) %in% res_var)]
+    Y <- trainData[[res_var]]
+    pca <- prcomp(X, center = TRUE, scale. = TRUE)
+    cum_var <- cumsum(pca$sdev^2) / sum(pca$sdev^2)
+    num_components <- which(cum_var >= 0.99)[1]
+    X_pca <- as.data.frame(pca$x[, 1:num_components, drop = FALSE])
+    fitControl <- trainControl(method = "repeatedcv", number = 10, repeats = 10)
+    model <- train(x = X_pca, y = Y,
+                   method = method,
+                   trControl = fitControl,
+                   metric = "RMSE",
+                   ...)
+    list(model = model, pca = pca, num_components = num_components)
+  }
+
+  train_pls <- function(trainData) {
+    X <- trainData[, !(names(trainData) %in% res_var)]
+    Y <- trainData[[res_var]]
+    fitControl <- trainControl(method = "repeatedcv", number = 10, repeats = 10)
+    pls_model <- train(
+      x = X,
+      y = Y,
+      na.action = na.omit,
+      trControl = fitControl,
+      method = "pls",
+      tuneLength = 30,
+      metric = "RMSE"
+    )
+    list(model = pls_model, pca = NULL, num_components = NA)
+  }
+
+  # Same network as before; the %>% chains are written as plain calls.
+  train_cnn <- function(trainData) {
+    data <- trainData[, !(names(trainData) %in% res_var)]
+    Y <- trainData[[res_var]]
+    n_features <- ncol(data)
+    model <- keras_model_sequential()
+    model <- layer_conv_1d(model, filters = 32, kernel_size = 3, activation = 'relu',
+                           input_shape = c(n_features, 1))
+    model <- layer_batch_normalization(model)
+    model <- layer_max_pooling_1d(model, pool_size = 2)
+    model <- layer_conv_1d(model, filters = 64, kernel_size = 5, activation = 'relu')
+    model <- layer_batch_normalization(model)
+    model <- layer_max_pooling_1d(model, pool_size = 2)
+    model <- layer_flatten(model)
+    model <- layer_dense(model, units = 128, activation = 'relu')
+    model <- layer_dropout(model, rate = 0.2)
+    model <- layer_dense(model, units = 1, activation = "linear")
+
+    compile(model,
+            loss = "mse",
+            optimizer = "adam",
+            metrics = c("mean_absolute_error"))
+
+    x <- as.matrix(data)
+    x_array <- array_reshape(x, c(nrow(x), n_features, 1))
+
+    fit(model,
+        x_array, Y,
+        epochs = 50,
+        batch_size = 32,
+        callbacks = list(
+          callback_early_stopping(monitor = "loss", patience = 15, min_delta = 0.001,
+                                  restore_best_weights = TRUE)
+        ),
+        verbose = 0)
+    list(model = model, pca = NULL, num_components = NA)
+  }
+
+  model_labels <- c(rf = "Random Forest", svm = "SVM", cb = "Cubist",
+                    pls = "PLS", cnn = "CNN")
+
+  # ---- Train ----
+  modelResult <- tryCatch(
+    switch(model_type,
+           "rf"  = train_on_pca(train_data, "rf"),
+           "svm" = train_on_pca(train_data, "svmRadial", tuneLength = 10),
+           "cb"  = train_on_pca(train_data, "cubist"),
+           "pls" = train_pls(train_data),
+           "cnn" = train_cnn(train_data)),
+    error = function(e) e
+  )
+  if (inherits(modelResult, "error")) {
+    return(fail(paste("Error training", model_labels[[model_type]], "model:",
+                      conditionMessage(modelResult), retry_hint)))
+  }
+
+  # ---- Predictions on the training data, for the calibration metrics ----
+  obs_cal <- train_data[[res_var]]
+  pred_cal <- tryCatch({
+    if (!is.null(modelResult$pca)) {
+      pca_scores <- as.data.frame(modelResult$pca$x)[, 1:modelResult$num_components, drop = FALSE]
+      predict(modelResult$model, newdata = pca_scores)
+    } else if (model_type == "cnn") {
+      pred_cols <- setdiff(names(train_data), res_var)
+      xmat      <- as.matrix(train_data[, pred_cols, drop = FALSE])
+      arr_train <- array_reshape(xmat, c(nrow(xmat), ncol(xmat), 1))
+      predict(modelResult$model, arr_train)
+    } else {
+      pred_cols <- setdiff(names(train_data), res_var)
+      predict(modelResult$model, newdata = train_data[, pred_cols, drop = FALSE])
+    }
+  }, error = function(e) e)
+  if (inherits(pred_cal, "error")) {
+    return(fail(paste("Error computing calibration metrics:", conditionMessage(pred_cal))))
+  }
+  pred_cal <- as.numeric(pred_cal)
+
+  # ---- Calibration metrics ----
+  r_val  <- cor(obs_cal, pred_cal, use = "complete.obs")
+  r2     <- r_val^2
+  me     <- mean(pred_cal - obs_cal, na.rm = TRUE)
+  rmse   <- sqrt(mean((pred_cal - obs_cal)^2, na.rm = TRUE))
+  sd_obs <- sd(obs_cal, na.rm = TRUE)
+  rpd    <- sd_obs / rmse
+  rpiq   <- IQR(obs_cal, na.rm = TRUE) / rmse
+  ccc    <- (2 * r_val * sd_obs * sd(pred_cal, na.rm = TRUE)) /
+    (sd_obs^2 + var(pred_cal, na.rm = TRUE) + (mean(obs_cal) - mean(pred_cal))^2)
+
+  metrics_df <- data.frame(
+    Metric = c("R2", "RMSE", "ME", "RPD", "RPIQ", "CCC"),
+    Value  = round(c(r2, rmse, me, rpd, rpiq, ccc), 4),
+    stringsAsFactors = FALSE
+  )
+
+  # ---- Predict the user's samples ----
+  if (!is.null(modelResult$pca)) {
+    user_pca <- tryCatch(
+      predict(modelResult$pca, newdata = user_matrix)[, 1:modelResult$num_components, drop = FALSE],
+      error = function(e) e)
+    if (inherits(user_pca, "error")) {
+      return(fail(paste("Error projecting user data for prediction:", conditionMessage(user_pca))))
+    }
+    preds <- tryCatch(round(predict(modelResult$model, newdata = as.data.frame(user_pca)), 2),
+                      error = function(e) e)
+    if (inherits(preds, "error")) {
+      return(fail(paste("Error predicting with PCA-based model:", conditionMessage(preds))))
+    }
+  } else if (model_type == "pls") {
+    preds <- tryCatch(round(predict(modelResult$model, newdata = as.data.frame(user_matrix)), 2),
+                      error = function(e) e)
+    if (inherits(preds, "error")) {
+      return(fail(paste("Error predicting with PLS model:", conditionMessage(preds))))
+    }
+  } else if (model_type == "cnn") {
+    x_array <- tryCatch(
+      array_reshape(user_spectra, c(nrow(user_spectra), ncol(user_spectra), 1)),
+      error = function(e) e)
+    if (inherits(x_array, "error")) {
+      return(fail(paste("Error reshaping user data for CNN:", conditionMessage(x_array))))
+    }
+    preds <- tryCatch(round(predict(modelResult$model, x_array), 2), error = function(e) e)
+    if (inherits(preds, "error")) {
+      return(fail(paste("Error predicting with CNN model:", conditionMessage(preds))))
+    }
+  }
+
+  list(ok = TRUE, metrics = metrics_df, preds = as.numeric(preds),
+       obs_cal = obs_cal, pred_cal = pred_cal)
+}
+
+# Starts knn_train_and_predict() in a background training slot and returns a
+# promise, for shiny::ExtendedTask. If background training isn't available
+# (see background_tasks.R), it trains here in the main process instead.
+start_knn_training <- function(args) {
+  if (isTRUE(background_training_available)) {
+    mirai::mirai(do.call(f, args), f = knn_train_and_predict, args = args)
+  } else {
+    promises::promise_resolve(do.call(knn_train_and_predict, args))
+  }
+}
+
 # knn_models.R
 
 source("modules/extraction_methods.R")
@@ -129,7 +328,13 @@ knnUI <- function(id) {
                 selected = "Cubist"
               ),
               
-              actionButton(ns("predict"), "Make Prediction"),
+              # Disables itself and shows the busy label while the model
+              # trains in the background (bound to the task in knnServer).
+              bslib::input_task_button(
+                ns("predict"), "Make Prediction",
+                label_busy = "Training in the background...",
+                type = "default"
+              ),
               downloadButton(ns("downloadData"), "Download Predictions & Metadata")
             )
         ),
@@ -202,7 +407,9 @@ knnServer <- function(id, shared, load_spectral_data_memo) {
       metrics        = NULL,   # data‑frame from calibMetrics()
       n_neighbors    = NA,     # how many rows used to train
       knn_type       = NA,     # "Distance" / "Neighbors"
-      knn_value      = NA      # threshold or k
+      knn_value      = NA,     # threshold or k
+      property       = NULL,   # soil property the predictions were trained for
+      model_type     = NULL    # model type the predictions were trained with
     )
     
     trainPlotData <- reactiveVal(NULL)
@@ -340,8 +547,9 @@ knnServer <- function(id, shared, load_spectral_data_memo) {
         meta <- paste(
           "Project : MIR KNN predictions",
           "\nDate    :", format(Sys.time(), "%Y-%m-%d %H:%M:%S"),
-          "\nSoil property predicted :", input$soilProperty,
-          "\nModel type              :", input$modelType,
+          # What was actually trained (the inputs may have changed since)
+          "\nSoil property predicted :", metaRV$property %||% input$soilProperty,
+          "\nModel type              :", metaRV$model_type %||% input$modelType,
           knn_str,
           metrics_str,
           "\nSoftware : R", getRversion(), "(caret, randomForest, etc.)"
@@ -361,137 +569,10 @@ knnServer <- function(id, shared, load_spectral_data_memo) {
     )
     
     
-    ##############################################################
-    # Training Functions with Error Handling
-    ##############################################################
-    
-    train_pls <- function(trainData, res_var = "calc_value") {
-      tryCatch({
-        X <- trainData[, !(names(trainData) %in% res_var)]
-        Y <- trainData[[res_var]]
-        fitControl <- trainControl(method = "repeatedcv", number = 10, repeats = 10)
-        pls_model <- train(
-          x = X,
-          y = Y,
-          na.action = na.omit,
-          trControl = fitControl,
-          method = "pls",
-          tuneLength = 30,
-          metric = "RMSE"
-        )
-        list(model = pls_model, pca = NULL, num_components = NA)
-      }, error = function(e) {
-        showNotification(paste("Error training PLS model:", e$message, " try increasing distance or number of neighbors."), type = "error")
-        return(NULL)
-      })
-    }
-    
-    train_rf <- function(trainData, res_var = "calc_value") {
-      tryCatch({
-        X <- trainData[, !(names(trainData) %in% res_var)]
-        Y <- trainData[[res_var]]
-        pca <- prcomp(X, center = TRUE, scale. = TRUE)
-        cum_var <- cumsum(pca$sdev^2) / sum(pca$sdev^2)
-        num_components <- which(cum_var >= 0.99)[1]
-        X_pca <- as.data.frame(pca$x[, 1:num_components, drop = FALSE])
-        fitControl <- trainControl(method = "repeatedcv", number = 10, repeats = 10)
-        model <- train(x = X_pca, y = Y,
-                       method = "rf",
-                       trControl = fitControl,
-                       metric = "RMSE")
-        list(model = model, pca = pca, num_components = num_components)
-      }, error = function(e) {
-        showNotification(paste("Error training Random Forest model:", e$message, " try increasing distance or number of neighbors."), type = "error")
-        return(NULL)
-      })
-    }
-    
-    train_svm <- function(trainData, res_var = "calc_value") {
-      tryCatch({
-        X <- trainData[, !(names(trainData) %in% res_var)]
-        Y <- trainData[[res_var]]
-        pca <- prcomp(X, center = TRUE, scale. = TRUE)
-        cum_var <- cumsum(pca$sdev^2) / sum(pca$sdev^2)
-        num_components <- which(cum_var >= 0.99)[1]
-        X_pca <- as.data.frame(pca$x[, 1:num_components, drop = FALSE])
-        fitControl <- trainControl(method = "repeatedcv", number = 10, repeats = 10)
-        model <- train(x = X_pca, y = Y,
-                       method = "svmRadial",
-                       trControl = fitControl,
-                       metric = "RMSE",
-                       tuneLength = 10)
-        list(model = model, pca = pca, num_components = num_components)
-      }, error = function(e) {
-        showNotification(paste("Error training SVM model:", e$message, " try increasing distance or number of neighbors."), type = "error")
-        return(NULL)
-      })
-    }
-    
-    train_cb <- function(trainData, res_var = "calc_value") {
-      tryCatch({
-        X <- trainData[, !(names(trainData) %in% res_var)]
-        Y <- trainData[[res_var]]
-        pca <- prcomp(X, center = TRUE, scale. = TRUE)
-        cum_var <- cumsum(pca$sdev^2) / sum(pca$sdev^2)
-        num_components <- which(cum_var >= 0.99)[1]
-        X_pca <- as.data.frame(pca$x[, 1:num_components, drop = FALSE])
-        fitControl <- trainControl(method = "repeatedcv", number = 10, repeats = 10)
-        model <- train(x = X_pca, y = Y,
-                       method = "cubist",
-                       trControl = fitControl,
-                       metric = "RMSE")
-        list(model = model, pca = pca, num_components = num_components)
-      }, error = function(e) {
-        showNotification(paste("Error training Cubist model:", e$message, " try increasing distance or number of neighbors."), type = "error")
-        return(NULL)
-      })
-    }
-    
-    train_cnn <- function(trainData, res_var = "calc_value") {
-      tryCatch({
-        data <- trainData[, !(names(trainData) %in% res_var)]
-        Y <- trainData[[res_var]]
-        n_features <- ncol(data)
-        model <- keras_model_sequential() %>%
-          layer_conv_1d(filters = 32, kernel_size = 3, activation = 'relu',
-                        input_shape = c(n_features, 1)) %>%
-          layer_batch_normalization() %>%
-          layer_max_pooling_1d(pool_size = 2) %>%
-          layer_conv_1d(filters = 64, kernel_size = 5, activation = 'relu') %>%
-          layer_batch_normalization() %>%
-          layer_max_pooling_1d(pool_size = 2) %>%
-          layer_flatten() %>%
-          layer_dense(units = 128, activation = 'relu') %>%
-          layer_dropout(rate = 0.2) %>%
-          layer_dense(units = 1, activation = "linear")
+    # The model training functions now live in knn_train_and_predict()
+    # (top of this file), which runs in a background process.
 
-        model %>% compile(
-          loss = "mse",
-          optimizer = "adam",
-          metrics = c("mean_absolute_error")
-        )
 
-        x <- as.matrix(data)
-        y <- Y
-        x_array <- array_reshape(x, c(nrow(x), n_features, 1))
-
-        history <- model %>% fit(
-          x_array, y,
-          epochs = 50,
-          batch_size = 32,
-          callbacks = list(
-            callback_early_stopping(monitor = "loss", patience = 15, min_delta = 0.001, restore_best_weights = TRUE)
-          ),
-          verbose = 0
-        )
-        list(model = model, pca = NULL, num_components = NA)
-      }, error = function(e) {
-        showNotification(paste("Error training CNN model:", e$message, " try increasing distance or number of neighbors."), type = "error")
-        return(NULL)
-      })
-    }
-    
-    
     # 1) Reactive: load & preprocess calibration + user data, run PCA, project user
     pcaData <- reactive({
       req(input$file1, input$soilProperty)
@@ -588,49 +669,46 @@ knnServer <- function(id, shared, load_spectral_data_memo) {
     })
 
     ##############################################################
-    # Main event to train the model and then predict on user data.
+    # Predict: prepare here (fast), train in the background, then
+    # show the results when the background job finishes.
     ##############################################################
+
+    # The background job (knn_train_and_predict via start_knn_training).
+    # Bound to the Predict button, which stays disabled while it runs.
+    train_task <- ExtendedTask$new(start_knn_training)
+    bslib::bind_task_button(train_task, "predict")
+
+    # Settings the running job was started with, so the results and the
+    # metadata download match what was trained even if the user changes
+    # the inputs while waiting.
+    job_info <- reactiveVal(NULL)
+
     observeEvent(input$predict, {
       req(input$soilProperty, user_data())
-      withProgress(message = "Making Predictions...", value = 0, {
+      withProgress(message = "Preparing training data...", value = 0, {
         tryCatch({
-          
+
           res_var <- "calc_value"
-          
+
           incProgress(0.1, detail = "Loading calibration data...")
-          # Load calibration data
-          cal_data <- tryCatch({
-            load_spectral_data_memo(input$soilProperty)
-          }, error = function(e) {
-            showNotification(paste("Error loading calibration data:", e$message, " try increasing distance or number of neighbors."), type = "error")
-            return(NULL)
-          })
+          # Calibration metadata + spectra already preprocessed (Savitzky-Golay
+          # -> resample to 10 cm^-1 -> SNV) from the shared calibration bundle
+          # (calibration_data.R), instead of reloading and reprocessing the
+          # raw file on every click.
+          bundle <- load_calibration(input$soilProperty)
           validate(
-            need(!is.null(cal_data) && nrow(cal_data) > 0,
+            need(!is.null(bundle) && nrow(bundle$meta) > 0,
                  "No calibration data found or it is empty.")
           )
-          
-          incProgress(0.1, detail = "Processing calibration data...")
-          # Separate soil info and spectra.
-          
-          soil <- cal_data[, 1:27]
-          MIR_new <- cal_data[, 28:1792]
-          colnames(MIR_new) <- seq(4000, 600, by = -1.927)
-          MIR_new <- as.matrix(MIR_new)
-          MIR_new <- matrix(as.numeric(MIR_new), nrow = nrow(MIR_new),
-                            dimnames = list(NULL, colnames(MIR_new)))
-          MIR.sg  <- savitzkyGolay(MIR_new, m = 0, w = 13, p = 2)
-          wav     <- as.numeric(colnames(MIR.sg))
-          new.wav <- seq(4000, 600, by = -10)
-          MIR.res <- resample(MIR.sg, wav, new.wav)
-          MIR.snv <- standardNormalVariate(MIR.res)
-          
+          soil    <- bundle$meta
+          MIR.snv <- bundle$snv
+
           calib_df <- as.data.frame(MIR.snv)
           if ("calc_value" %in% colnames(soil)) {
             calib_df$calc_value <- soil[["calc_value"]]
           }
-          
-          incProgress(0.2, detail = "Performing PCA on calibration data...")
+
+          incProgress(0.2, detail = "Loading pretrained PCA...")
           # Load pretrained PCA for this soil property
           obj     <- get_pretrained_pca(input$soilProperty)
           pca_res <- obj$pca
@@ -723,128 +801,86 @@ knnServer <- function(id, shared, load_spectral_data_memo) {
             return(NULL)
           })
           
-          incProgress(0.1, detail = "Training model and making predictions...")
-          ensure_training_cluster()   # parallel workers healthy (parallel_training.R)
-          # Train the model based on the selected model type.
-          modelResult <- switch(input$modelType,
-                                "rf"  = train_rf(trainData, res_var),
-                                "svm" = train_svm(trainData, res_var),
-                                "cb"  = train_cb(trainData, res_var),
-                                "pls" = train_pls(trainData, res_var),
-                                "cnn" = train_cnn(trainData, res_var)
-                                )
-          if (is.null(modelResult)) return()
-          showNotification("Model training complete!", type = "message")
-          
-          
-          #compute predictions on training data
-          obs_cal <- trainData$calc_value
-          if (!is.null(modelResult$pca)) {
-            pca_scores <- as.data.frame(modelResult$pca$x)[, 1:modelResult$num_components, drop=FALSE]
-            pred_cal   <- predict(modelResult$model, newdata = pca_scores)
-          } else if (input$modelType == "cnn") {
-            pred_cols  <- setdiff(names(trainData), "calc_value")
-            xmat       <- as.matrix(trainData[, pred_cols, drop=FALSE])
-            arr_train  <- array_reshape(xmat, c(nrow(xmat), ncol(xmat), 1))
-            pred_cal   <- as.numeric(modelResult$model %>% predict(arr_train))}
-          else {
-            pred_cols  <- setdiff(names(trainData), "calc_value")
-            pred_cal   <- predict(modelResult$model, newdata = trainData[, pred_cols, drop=FALSE])
-          }
-          pred_cal <- as.numeric(pred_cal)
-          
-          # --- calculate metrics ---
-          r_val   <- cor(obs_cal, pred_cal, use = "complete.obs")
-          r2      <- r_val^2
-          me <- mean(pred_cal - obs_cal, na.rm = TRUE)      
-          rmse    <- sqrt(mean((pred_cal - obs_cal)^2, na.rm = TRUE))
-          sd_obs  <- sd(obs_cal, na.rm = TRUE)
-          rpd     <- sd_obs / rmse
-          rpiq    <- IQR(obs_cal, na.rm = TRUE) / rmse
-          ccc     <- (2 * r_val * sd_obs * sd(pred_cal, na.rm = TRUE)) /
-            (sd_obs^2 + var(pred_cal, na.rm = TRUE) + (mean(obs_cal) - mean(pred_cal))^2)
-          
-          metrics_df <- data.frame(
-            Metric = c("R2", "RMSE", "ME", "RPD", "RPIQ", "CCC"),
-            Value  = round(c(r2, rmse, me, rpd, rpiq, ccc), 4),
-            stringsAsFactors = FALSE
-          )
-          
-          calibMetrics(metrics_df)
-          
-          metaRV$metrics     <- metrics_df
-          metaRV$n_neighbors <- length(all_neighbor_indices)
-          metaRV$knn_type    <- input$knnType
-          metaRV$knn_value   <- input$knnSlider
-          
-          # Predict on the user data.
-          if (!is.null(modelResult$pca)) {
-            user_pca <- tryCatch({
-              predict(modelResult$pca, newdata = user_matrix)[, 1:modelResult$num_components, drop = FALSE]
-            }, error = function(e) {
-              showNotification(paste("Error projecting user data for prediction:", e$message), type = "error")
-              return(NULL)
-            })
-            preds <- tryCatch({
-              round(predict(modelResult$model, newdata = as.data.frame(user_pca)), 2)
-            }, error = function(e) {
-              showNotification(paste("Error predicting with PCA-based model:", e$message), type = "error")
-              return(NULL)
-            })
-          } else if (input$modelType == "pls") {
-            preds <- tryCatch({
-              round(predict(modelResult$model, newdata = as.data.frame(user_matrix)), 2)
-            }, error = function(e) {
-              showNotification(paste("Error predicting with PLS model:", e$message), type = "error")
-              return(NULL)
-            })
-          } else if (input$modelType == "cnn") {
-            # First column is the sample ID, whatever it's named
-            # ("scan_path_name" from Data Preprocessing, "SampleID" from
-            # Spectral Transformation); the rest are the spectra.
-            predictor_cols <- names(user_data())[-1]
-            user_matrix <- tryCatch({
-              as.matrix(user_data()[, predictor_cols, drop = FALSE])
+          # CNN uses every spectral column of the upload: everything after
+          # the first column, which is the sample ID whatever it's named
+          # ("scan_path_name" from Data Preprocessing, "SampleID" from
+          # Spectral Transformation).
+          user_spectra <- NULL
+          if (input$modelType == "cnn") {
+            user_spectra <- tryCatch({
+              as.matrix(user_data()[, names(user_data())[-1], drop = FALSE])
             }, error = function(e) {
               showNotification(paste("Error subsetting user predictors:", e$message), type = "error")
               return(NULL)
             })
-            n_features <- ncol(user_matrix)
-            x_array <- tryCatch({
-              array_reshape(user_matrix, c(nrow(user_matrix), n_features, 1))
-            }, error = function(e) {
-              showNotification(paste("Error reshaping user data for CNN:", e$message), type = "error")
-              return(NULL)
-            })
-            preds <- tryCatch({
-              round(predict(modelResult$model, x_array), 2)
-            }, error = function(e) {
-              showNotification(paste("Error predicting with CNN model:", e$message), type = "error")
-              return(NULL)
-            })
+            if (is.null(user_spectra)) return()
           }
-          if (is.null(preds)) return()
-          
-          incProgress(0.1, detail = "Finishing up...")
-          pred_df <- tryCatch({
-            # Sample IDs come from the first column, whatever it's named
-            # (same approach as the Static Models page).
-            data.frame("Sample Name" = user_data()[[1]], Prediction = preds)
-          }, error = function(e) {
-            showNotification(paste("Error building predictions dataframe:", e$message), type = "error")
-            return(NULL)
-          })
-          
-          shared$preds <- pred_df
-          
-          output$pred_table <- DT::renderDataTable({
-            DT::datatable(pred_df)
-          })
+
+          incProgress(0.2, detail = "Starting training in the background...")
+          job_info(list(
+            sample_ids  = user_data()[[1]],
+            property    = input$soilProperty,
+            model_type  = input$modelType,
+            knn_type    = input$knnType,
+            knn_value   = input$knnSlider,
+            n_neighbors = length(all_neighbor_indices)
+          ))
+          train_task$invoke(list(
+            train_data   = trainData,
+            user_matrix  = user_matrix,
+            user_spectra = user_spectra,
+            model_type   = input$modelType
+          ))
 
         }, error = function(e) {
           showNotification(paste("Error during model training and prediction:", e$message), type = "error")
         })
-        trainPlotData( data.frame(obs = obs_cal, pred = pred_cal) )
+      })
+    })
+
+    # Show the results when the background job finishes.
+    observeEvent(train_task$status(), {
+      status <- train_task$status()
+      if (status == "error") {
+        # The background process itself failed (e.g. it was stopped or ran
+        # out of memory); errors during training come back as ok = FALSE.
+        msg <- tryCatch({ train_task$result(); "unknown error" },
+                        error = function(e) conditionMessage(e))
+        showNotification(paste("Error during model training and prediction:", msg), type = "error")
+        return()
+      }
+      if (status != "success") return()
+
+      res  <- train_task$result()
+      info <- job_info()
+      if (!isTRUE(res$ok)) {
+        showNotification(res$error, type = "error")
+        return()
+      }
+      showNotification("Model training complete!", type = "message")
+
+      calibMetrics(res$metrics)
+      metaRV$metrics     <- res$metrics
+      metaRV$n_neighbors <- info$n_neighbors
+      metaRV$knn_type    <- info$knn_type
+      metaRV$knn_value   <- info$knn_value
+      metaRV$property    <- info$property
+      metaRV$model_type  <- info$model_type
+      trainPlotData(data.frame(obs = res$obs_cal, pred = res$pred_cal))
+
+      pred_df <- tryCatch({
+        # Sample IDs come from the first column, whatever it's named
+        # (same approach as the Static Models page).
+        data.frame("Sample Name" = info$sample_ids, Prediction = res$preds)
+      }, error = function(e) {
+        showNotification(paste("Error building predictions dataframe:", e$message), type = "error")
+        return(NULL)
+      })
+      if (is.null(pred_df)) return()
+
+      shared$preds <- pred_df
+      output$pred_table <- DT::renderDataTable({
+        DT::datatable(pred_df)
       })
     })
     
