@@ -102,6 +102,10 @@ load_map_data_memo <- memoise(function(property) {
 source_files <- list.files('./modules', pattern = '\\.R$', full.names = TRUE)
 sapply(source_files, source)
 
+# Start the background training processes (modules/background_tasks.R). Done
+# here, after every module is loaded, because it uses parallel_training.R.
+start_background_trainer()
+
 # Define soil properties
 soilProperties <- list(
   "Sand        "             = "Sand",

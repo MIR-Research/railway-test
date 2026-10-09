@@ -9,19 +9,20 @@
 # Design choices:
 # - Workers are fresh R processes (PSOCK), not forks of the app. Forking a
 #   process that has TensorFlow loaded (after any CNN use) can hang.
-# - Worker count comes from parallelly::availableCores(), which respects the
-#   container's CPU limit (parallel::detectCores() can report the host's
-#   cores on Railway). One core is left for the app itself. Override with
-#   TRAINING_WORKERS.
+# - Each pool has TRAINING_WORKERS workers (default 2), so one training job
+#   uses 2 cores. More CPUs on Railway let more jobs run at once instead
+#   (see background_tasks.R). The count is capped by
+#   parallelly::availableCores(), which respects the container's CPU limit
+#   (parallel::detectCores() can report the host's cores on Railway).
 # - Each worker's BLAS is limited to 1 thread so N workers use N cores
 #   instead of each also spawning a thread per core.
 
 training_cluster <- NULL
 
 training_worker_count <- function() {
-  n <- suppressWarnings(as.integer(Sys.getenv("TRAINING_WORKERS", "")))
-  if (is.na(n) || n < 1) n <- parallelly::availableCores(omit = 1)
-  max(1L, as.integer(n))
+  n <- suppressWarnings(as.integer(Sys.getenv("TRAINING_WORKERS", "2")))
+  if (is.na(n) || n < 1) n <- 2L
+  max(1L, min(n, parallelly::availableCores()))
 }
 
 start_training_cluster <- function() {
