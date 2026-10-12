@@ -1213,7 +1213,10 @@ dataAggregationServer <- function(id, shared, session) {
     })
 
     # inside dataAggregationServer(), right after you define the outputs
-    outputOptions(output, "sst_plot",      suspendWhenHidden = FALSE)
+    # sst_plot is left out: drawing it before its card is on the page made
+    # thematic error ("getCurrentOutputInfo()[["bg"]]: attempt to apply
+    # non-function"), since the page hasn't reported the plot's colours yet.
+    # outputOptions(output, "sst_plot",      suspendWhenHidden = FALSE)
     outputOptions(output, "mir_plot",      suspendWhenHidden = FALSE)
     outputOptions(output, "sg_plot",       suspendWhenHidden = FALSE)
     outputOptions(output, "resample_plot", suspendWhenHidden = FALSE)

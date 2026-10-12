@@ -200,20 +200,30 @@ dataInputServer <- function(id, shared, load_spectral_data_memo) {
         shared$pcaPlot <- ggplot() + theme_void() +
           annotate("text", x = 0.5, y = 0.5, label = "PCA plot not available for CNN models")
 
-        # reshape to (batch, n_features, 1)
-        x <- as.matrix(df)
-        x <- keras::array_reshape(x, c(nrow(x), ncol(x), 1))
-        
-        predictions <- tryCatch({
-          # shared$usedModel is a reticulate proxy for a Keras 3 Python
-          # object. R's predict() S3 dispatch only matches the older
-          # tf.keras class names (e.g. "keras.engine.training.Model"), which
-          # this object doesn't have, so call Python's predict() directly.
-          as.numeric(shared$usedModel$predict(x))
-        }, error = function(e) {
-          showNotification(paste("Error making predictions with CNN model:", e$message), type = "error")
+        # # reshape to (batch, n_features, 1)
+        # x <- as.matrix(df)
+        # x <- keras::array_reshape(x, c(nrow(x), ncol(x), 1))
+        #
+        # predictions <- tryCatch({
+        #   # shared$usedModel is a reticulate proxy for a Keras 3 Python
+        #   # object. R's predict() S3 dispatch only matches the older
+        #   # tf.keras class names (e.g. "keras.engine.training.Model"), which
+        #   # this object doesn't have, so call Python's predict() directly.
+        #   as.numeric(shared$usedModel$predict(x))
+        # }, error = function(e) {
+        #   showNotification(paste("Error making predictions with CNN model:", e$message), type = "error")
+        #   NULL
+        # })
+
+        # The prediction now runs in a background process (cnn_worker.R):
+        # TensorFlow's predict() was segfaulting the main app process on
+        # Railway. shared$usedModel holds the model's bucket key; the
+        # reshape and predict happen in the background process.
+        res <- cnn_predict(shared$usedModel$key, as.matrix(df))
+        predictions <- if (res$ok) res$value else {
+          showNotification(paste("Error making predictions with CNN model:", res$error), type = "error")
           NULL
-        })
+        }
         
         if (is.null(predictions) || length(predictions) == 0) {
           shared$predictions <- NULL
