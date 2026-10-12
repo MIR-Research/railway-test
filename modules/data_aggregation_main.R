@@ -171,6 +171,16 @@ dataAggregationUI <- function(id) {
               label = "Standard Normal Variate/Baseline Correction",
               value = TRUE
             ),
+            # Calibration transfer (spectral space transformation, SST): maps
+            # Alpha II spectra into the Vertex 70 / KSSL spectral space. Only
+            # available with the preprocessing the transfer model was built
+            # on; see sst_allowed() in the server.
+            checkboxInput(
+              ns("sst"),
+              label = "Calibration Transfer (Alpha II → Vertex 70 / KSSL)",
+              value = FALSE
+            ),
+            uiOutput(ns("sst_note")),
             actionButton(ns("start"), "Start Preprocessing"),
             downloadButton(ns("step_data"), "Download")
           )
@@ -189,7 +199,8 @@ dataAggregationUI <- function(id) {
         ),
         uiOutput(ns("sg_card")),
         uiOutput(ns("resample_card")),
-        uiOutput(ns("snv_card"))
+        uiOutput(ns("snv_card")),
+        uiOutput(ns("sst_card"))
       )
     )
   )
@@ -648,9 +659,82 @@ dataAggregationServer <- function(id, shared, session) {
       
       # now tack on the outlier‐detection flag
       cfg0$use_outlier <- isTRUE(input$use_outlier)
-      
+
+      # calibration transfer, only when the settings match the transfer model
+      cfg0$sst <- isTRUE(input$sst) && sst_compatible(cfg0)
+
       # and return
       cfg0
+    })
+
+    # ---- Calibration transfer (SST) -----------------------------------------
+    # The transfer model was built on spectra preprocessed exactly this way:
+    # snip 4000-600 -> SG (m = 0, w = 13, p = 2) -> resample to 10 cm^-1 -> SNV
+    # (the "Default" settings). With any other settings its output would be
+    # meaningless, so the checkbox is disabled unless the settings match.
+    sst_compatible <- function(c) {
+      isTRUE(c$sg) && c$m == 0 && c$w == 13 && c$p == 2 &&
+        isTRUE(c$resampled) && c$resample_val == 10 &&
+        isTRUE(c$snv)
+    }
+
+    observe({
+      if (sst_compatible(cfg())) {
+        shinyjs::enable("sst")
+      } else {
+        shinyjs::disable("sst")
+        if (isTRUE(input$sst)) updateCheckboxInput(session, "sst", value = FALSE)
+      }
+    })
+
+    output$sst_note <- renderUI({
+      if (sst_compatible(cfg())) return(NULL)
+      tags$small(
+        class = "text-muted",
+        "Calibration transfer requires the Default preprocessing settings ",
+        "(Savitzky-Golay m = 0, w = 13, p = 2; resample to 10 cm⁻¹; SNV)."
+      )
+    })
+
+    # The transfer model lives in the bucket and is loaded through the shared
+    # model cache (bucket_helper.R), so it is downloaded once per app process.
+    sst_model_key <- Sys.getenv("SST_MODEL_KEY", "transfer_models/SST_final_UW100.rds")
+
+    # Applies the transfer model to the preprocessed spectra (same steps as
+    # apply_SST_UW100.R). Returns list(before, after, model) or NULL when the
+    # transfer wasn't requested; stops with a message if it fails.
+    sst_result <- eventReactive(input$start, {
+      c <- last_cfg()
+      if (!isTRUE(c$sst)) return(NULL)
+      mat <- snv_mat()
+
+      sst <- tryCatch(read_bucket_rds_cached(sst_model_key), error = function(e) e)
+      if (inherits(sst, "error")) {
+        msg <- paste("Calibration transfer failed: could not load the transfer model (",
+                     sst_model_key, "):", conditionMessage(sst))
+        showNotification(msg, type = "error")
+        stop(msg)
+      }
+
+      # Check the wavenumbers match before transforming
+      missing_wn <- setdiff(sst$wavenumbers, colnames(mat))
+      if (length(missing_wn) > 0) {
+        msg <- paste("Calibration transfer failed: missing wavenumber columns, e.g.",
+                     paste(head(missing_wn, 3), collapse = ", "))
+        showNotification(msg, type = "error")
+        stop(msg)
+      }
+
+      before <- mat[, sst$wavenumbers, drop = FALSE]   # selects + orders the columns
+      after  <- sst$apply(before)
+      colnames(after) <- sst$wavenumbers
+      list(before = before, after = after, model = sst)
+    })
+
+    # The spectra that go into the download: transformed if calibration
+    # transfer was applied, otherwise the regular preprocessing output.
+    final_mat <- eventReactive(input$start, {
+      if (isTRUE(last_cfg()$sst)) sst_result()$after else snv_mat()
     })
     
     # snapshot of cfg() at the moment "Start" is clicked, so the plot cards
@@ -950,7 +1034,14 @@ dataAggregationServer <- function(id, shared, session) {
     
     # when the final matrix is computed, light up the plots
     observeEvent(snv_mat(), {
-      status(build_status_msg())                    # <-- single, tidy message
+      done_txt <- "Processing complete!"
+      if (isTRUE(last_cfg()$sst)) {
+        # Run the calibration transfer now so any failure shows immediately
+        ok <- tryCatch({ sst_result(); TRUE }, error = function(e) FALSE)
+        done_txt <- if (ok) "Processing complete! Calibration transfer applied."
+                    else "Preprocessing complete, but calibration transfer FAILED (see Messages)."
+      }
+      status(build_status_msg(done_txt))            # <-- single, tidy message
       log_debug("snv_mat ready — status banner updated")
     })
     
@@ -1045,7 +1136,72 @@ dataAggregationServer <- function(id, shared, session) {
       )
     })
     
+    # Mean +/- SD of the spectra before and after calibration transfer
+    # (adapted from the old Spectral Transformation page's mean +/- SD plot).
+    draw_sst_plot <- function(res) {
+      B <- res$before; A <- res$after
+      wav <- as.numeric(colnames(B))
+      mean_B <- colMeans(B); sd_B <- apply(B, 2, sd)
+      mean_A <- colMeans(A); sd_A <- apply(A, 2, sd)
+      sd_B[is.na(sd_B)] <- 0; sd_A[is.na(sd_A)] <- 0   # a single sample has no SD
+
+      op <- par(no.readonly = TRUE)
+      on.exit(par(op))
+      par(cex.main = 1.8, cex.lab = 1.4, cex.axis = 1.2, mar = c(5, 5, 4, 2))
+
+      y_range <- range(c(mean_B + sd_B, mean_B - sd_B, mean_A + sd_A, mean_A - sd_A), na.rm = TRUE)
+      draw_band <- function(m, s, col) {
+        polygon(c(wav, rev(wav)), c(m + s, rev(m - s)),
+                col = adjustcolor(col, alpha.f = 0.15), border = NA)
+      }
+      plot(wav, mean_B, type = "n",
+           xlim = rev(range(wav)), ylim = y_range,
+           main = "Calibration Transfer: Mean ± SD",
+           xlab = expression(paste("Wavenumber (cm"^-1, ")")),
+           ylab = "Absorbance")
+      draw_band(mean_B, sd_B, "red")
+      draw_band(mean_A, sd_A, "blue")
+      lines(wav, mean_B, col = "red",  lwd = 2, lty = 2)
+      lines(wav, mean_A, col = "blue", lwd = 2)
+      legend("topright",
+             legend = c("Before transfer (Alpha II)", "After transfer (Vertex 70 / KSSL space)"),
+             col = c("red", "blue"), lty = c(2, 1), lwd = 2,
+             fill = adjustcolor(c("red", "blue"), alpha.f = 0.15), border = NA)
+    }
+
+    output$sst_plot <- renderPlot({
+      res <- sst_result(); req(res)
+      draw_sst_plot(res)
+    })
+
+    output$download_sst_jpg <- downloadHandler(
+      filename = function() paste0("calibration_transfer_", Sys.Date(), ".jpg"),
+      content = function(file) {
+        jpeg(file, width = 1920, height = 1080, units = "px", quality = 95)
+        draw_sst_plot(sst_result())
+        dev.off()
+      }
+    )
+
+    output$sst_card <- renderUI({
+      req(input$start)
+      c <- last_cfg()
+      if (!isTRUE(c$sst)) return(NULL)
+      tagList(
+        br(),
+        card(
+          full_screen = TRUE,
+          card_header = "Calibration Transfer Plot",
+          card_body(
+            plotOutput(ns("sst_plot")),
+            downloadButton(ns("download_sst_jpg"), "Download Calibration Transfer JPG")
+          )
+        )
+      )
+    })
+
     # inside dataAggregationServer(), right after you define the outputs
+    outputOptions(output, "sst_plot",      suspendWhenHidden = FALSE)
     outputOptions(output, "mir_plot",      suspendWhenHidden = FALSE)
     outputOptions(output, "sg_plot",       suspendWhenHidden = FALSE)
     outputOptions(output, "resample_plot", suspendWhenHidden = FALSE)
@@ -1233,7 +1389,7 @@ dataAggregationServer <- function(id, shared, session) {
       content = function(file) {
         withProgress(message = "Packaging download…", value = 0, {
           incProgress(0.2, detail = "Assembling matrix…")
-          mat  <- snv_mat()
+          mat  <- final_mat()   # transformed if calibration transfer was applied
           samp <- avg_df()[[1]]  # ID column name varies by upload type
           df_out <- data.frame(
             scan_path_name = samp,
@@ -1268,6 +1424,20 @@ dataAggregationServer <- function(id, shared, session) {
             if (c$sg) sprintf("  (m = %d, w = %d, p = %d)", c$m, c$w, c$p),
             sprintf("\n      • Resample interval    : %s", ifelse(c$resampled, paste(c$resample_val, "cm⁻¹"), "no")),
             sprintf("\n      • SNV / baseline corr. : %s", c$snv),
+            sprintf("\n      • Calibration transfer : %s", isTRUE(last_cfg()$sst)),
+            if (isTRUE(last_cfg()$sst)) {
+              sst <- sst_result()$model
+              paste0(
+                "\n\nCalibration transfer (spectral space transformation):",
+                sprintf("\n      Direction     : %s", sst$direction),
+                sprintf("\n      Transfer set  : %s", sst$transfer_set),
+                sprintf("\n      Components    : %s", sst$ncomp),
+                sprintf("\n      Preprocessing : %s", sst$preprocessing),
+                sprintf("\n      Instrument    : %s", sst$instrument),
+                sprintf("\n      Model created : %s", format(sst$created)),
+                sprintf("\n      Model file    : %s", sst_model_key)
+              )
+            },
             "\n\nSoftware:",
             "\n      R ", getRversion(), " (prospectr, shiny, shinyWidgets)"
           )
