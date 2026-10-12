@@ -672,10 +672,20 @@ dataAggregationServer <- function(id, shared, session) {
     # snip 4000-600 -> SG (m = 0, w = 13, p = 2) -> resample to 10 cm^-1 -> SNV
     # (the "Default" settings). With any other settings its output would be
     # meaningless, so the checkbox is disabled unless the settings match.
-    sst_compatible <- function(c) {
+    sst_settings_match <- function(c) {
       isTRUE(c$sg) && c$m == 0 && c$w == 13 && c$p == 2 &&
         isTRUE(c$resampled) && c$resample_val == 10 &&
         isTRUE(c$snv)
+    }
+
+    # TEMPORARY: the settings check is switched off so already-preprocessed
+    # files can be uploaded (with SG / resampling / SNV unticked) and run
+    # through the calibration transfer as-is. Set back to TRUE to require
+    # the Default settings again. metadata.txt records whether they matched.
+    SST_REQUIRE_DEFAULT_SETTINGS <- FALSE
+
+    sst_compatible <- function(c) {
+      !SST_REQUIRE_DEFAULT_SETTINGS || sst_settings_match(c)
     }
 
     observe({
@@ -910,8 +920,10 @@ dataAggregationServer <- function(id, shared, session) {
       
       if (input$upload_type == "partial") {
         
-        # Identify spectral columns by numeric type
-        spec_idx <- which(sapply(df, is.numeric))
+        # Identify spectral columns by numeric type. The first column is the
+        # sample ID (as everywhere else in this pipeline), so it's excluded
+        # even when the IDs are numbers (e.g. "SampleID" = 28851, ...).
+        spec_idx <- setdiff(which(sapply(df, is.numeric)), 1L)
         if (length(spec_idx) == 0) {
           stop("No numeric columns found in CSV for spectral data")
         }
@@ -1432,6 +1444,9 @@ dataAggregationServer <- function(id, shared, session) {
                 sprintf("\n      Direction     : %s", sst$direction),
                 sprintf("\n      Transfer set  : %s", sst$transfer_set),
                 sprintf("\n      Components    : %s", sst$ncomp),
+                sprintf("\n      Settings match model's preprocessing : %s",
+                        if (sst_settings_match(last_cfg())) "Yes" else
+                          "NO (settings check was switched off; input assumed already preprocessed)"),
                 sprintf("\n      Preprocessing : %s", sst$preprocessing),
                 sprintf("\n      Instrument    : %s", sst$instrument),
                 sprintf("\n      Model created : %s", format(sst$created)),
