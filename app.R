@@ -3,6 +3,20 @@
 # In Desc Stats, adjust so when using strats "Show All" shows all in the strat category, and Pin the navbar to the top so we see it when scrolling
 options(shiny.fullstacktrace = TRUE)
 
+# Cap TensorFlow's thread pools. By default TensorFlow sizes them from the
+# CPU count of the whole Railway host machine (far more than this service's
+# vCPUs), so it tried to start hundreds of threads, hit the container's
+# thread limit and crashed ("Thread tf_Compute creation via pthread_create()
+# failed"). Set here, before TensorFlow starts, so the main process and the
+# background training processes (which inherit these) all use the cap.
+# Override with the same-named Railway variables.
+if (!nzchar(Sys.getenv("TF_NUM_INTRAOP_THREADS"))) {
+  Sys.setenv(TF_NUM_INTRAOP_THREADS = min(4L, parallelly::availableCores()))
+}
+if (!nzchar(Sys.getenv("TF_NUM_INTEROP_THREADS"))) {
+  Sys.setenv(TF_NUM_INTEROP_THREADS = 2L)
+}
+
 options(warn = -1)
 
 options(max.print = 10000)

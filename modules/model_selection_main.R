@@ -394,11 +394,11 @@ modelSelectionServer <- function(id, shared, soilPropertyName) {
         else if (shared$mlModel == "CNN") {
           # Loading CNN model using Keras
           model_file <- bucket_key(model_prefixes(), paste0(id, "_CNN_model.keras"))
-          # shared$usedModel <- try_load_model(load_bucket_keras_model_cached, model_file)
-          # CNN models now load and run in a background process (cnn_worker.R)
-          loaded <- cnn_load_model(model_file)
-          if (!loaded$ok) message("CNN model load failed for: ", model_file, " | ", loaded$error)
-          shared$usedModel <- if (loaded$ok) cnn_model_ref(model_file) else NULL
+          shared$usedModel <- try_load_model(load_bucket_keras_model_cached, model_file)
+          # Disabled: loaded the model in a background process (old_code/cnn_worker.R)
+          # loaded <- cnn_load_model(model_file)
+          # if (!loaded$ok) message("CNN model load failed for: ", model_file, " | ", loaded$error)
+          # shared$usedModel <- if (loaded$ok) cnn_model_ref(model_file) else NULL
           if (!is.null(shared$usedModel)) {
             showNotification("Loaded CNN model file", type = "message")
           } else {
@@ -441,11 +441,11 @@ modelSelectionServer <- function(id, shared, soilPropertyName) {
           model_file <- model_input_value
           print(model_file)
           
-          # shared$usedModel <- try_load_model(load_bucket_keras_model_cached, model_file)
-          # CNN models now load and run in a background process (cnn_worker.R)
-          loaded <- cnn_load_model(model_file)
-          if (!loaded$ok) message("CNN model load failed for: ", model_file, " | ", loaded$error)
-          shared$usedModel <- if (loaded$ok) cnn_model_ref(model_file) else NULL
+          shared$usedModel <- try_load_model(load_bucket_keras_model_cached, model_file)
+          # Disabled: loaded the model in a background process (old_code/cnn_worker.R)
+          # loaded <- cnn_load_model(model_file)
+          # if (!loaded$ok) message("CNN model load failed for: ", model_file, " | ", loaded$error)
+          # shared$usedModel <- if (loaded$ok) cnn_model_ref(model_file) else NULL
           if (!is.null(shared$usedModel)) {
             showNotification("Loaded CNN model file", type = "message")
           } else {
