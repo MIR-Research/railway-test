@@ -177,7 +177,12 @@ dataAggregationUI <- function(id) {
             # on; see sst_allowed() in the server.
             checkboxInput(
               ns("sst"),
-              label = "Calibration Transfer (Alpha II → Vertex 70 / KSSL)",
+              # label = "Calibration Transfer (Alpha II → Vertex 70 / KSSL)",
+              label = tagList(
+                "Calibration Transfer - Spectral Space Transformation",
+                br(),
+                "Alpha II → Vertex 70/HTS-XT (KSSL Instrument)"
+              ),
               value = FALSE
             ),
             uiOutput(ns("sst_note")),
@@ -706,6 +711,25 @@ dataAggregationServer <- function(id, shared, session) {
       )
     })
 
+    # Describe the calibration transfer tool when the user ticks the box
+    observeEvent(input$sst, {
+      if (!isTRUE(input$sst)) return()
+      showModal(modalDialog(
+        title = "Calibration transfer accuracy",
+        p("Spectra must be preprocessed exactly as described (snip 4000–600 cm⁻¹ → ",
+          "SG smoothing, w = 13, p = 2 → 10 cm⁻¹ resampling → SNV)."),
+        p("SST reduced the spectral difference between the two instruments from ",
+          "RMSE = 0.280 to 0.212, a 24% reduction, and increased spectral agreement ",
+          "(CCC) between them from 0.82 to 0.88."),
+        p("The SST transform was developed from 100 soils scanned on one Bruker Alpha II ",
+          "and one Bruker Vertex 70/HTS-XT. SST has not been tested on other Alpha II ",
+          "units; because each instrument has its own optical characteristics, performance ",
+          "on another unit may be different."),
+        easyClose = TRUE,
+        footer = modalButton("OK")
+      ))
+    }, ignoreInit = TRUE)
+
     # The transfer model lives in the bucket and is loaded through the shared
     # model cache (bucket_helper.R), so it is downloaded once per app process.
     sst_model_key <- Sys.getenv("SST_MODEL_KEY", "transfer_models/SST_final_UW100.rds")
@@ -1181,17 +1205,80 @@ dataAggregationServer <- function(id, shared, session) {
              fill = adjustcolor(c("red", "blue"), alpha.f = 0.15), border = NA)
     }
 
+    # The user's spectra before and after calibration transfer against the
+    # KSSL reference: the mean +/- SD of a property's KSSL calibration
+    # spectra, drawn like the Static Models spectral plot (grey band, black
+    # mean line). See kssl_reference_summary() at the bottom of this file.
+    draw_sst_kssl_plot <- function(res, ref) {
+      B <- res$before; A <- res$after
+      wav <- as.numeric(colnames(B))
+      mean_B <- colMeans(B); mean_A <- colMeans(A)
+      ref_mean <- ref$mean[colnames(B)]; ref_sd <- ref$sd[colnames(B)]
+      if (anyNA(ref_mean)) stop("KSSL reference wavenumbers don't match the transferred spectra")
+
+      op <- par(no.readonly = TRUE)
+      on.exit(par(op))
+      par(cex.main = 1.8, cex.lab = 1.4, cex.axis = 1.2, mar = c(5, 5, 4, 2))
+
+      y_range <- range(c(ref_mean + ref_sd, ref_mean - ref_sd, mean_B, mean_A), na.rm = TRUE)
+      plot(wav, ref_mean, type = "n",
+           xlim = rev(range(wav)), ylim = y_range,
+           main = paste0("Calibration Transfer vs KSSL Reference (", ref$label, ")"),
+           xlab = expression(paste("Wavenumber (cm"^-1, ")")),
+           ylab = "Absorbance")
+      polygon(c(wav, rev(wav)), c(ref_mean + ref_sd, rev(ref_mean - ref_sd)),
+              col = scales::alpha("gray", 0.5), border = NA)
+      lines(wav, ref_mean, col = "black", lwd = 2)
+      lines(wav, mean_B, col = "red",  lwd = 2, lty = 2)
+      lines(wav, mean_A, col = "blue", lwd = 2)
+      legend("topright",
+             legend = c(sprintf("KSSL mean ± SD (%s, n = %s)", ref$label, format(ref$n, big.mark = ",")),
+                        "Before transfer (Alpha II)", "After transfer (Vertex 70 / KSSL space)"),
+             col = c("black", "red", "blue"), lty = c(1, 2, 1), lwd = 2,
+             fill = c(scales::alpha("gray", 0.5), NA, NA), border = NA,
+             bg = "white", box.lwd = 0.5, box.col = "black")
+    }
+
+    # NULL (with an error message) if the KSSL reference can't be loaded
+    sst_kssl_reference <- function() {
+      tryCatch(
+        withProgress(message = "Loading KSSL reference spectra...", value = 0.5,
+                     kssl_reference_summary(SST_KSSL_REFERENCE_PROPERTY)),
+        error = function(e) {
+          showNotification(paste("Could not load the KSSL reference spectra:", conditionMessage(e)),
+                           type = "error")
+          NULL
+        }
+      )
+    }
+
+    # Draws whichever view is selected with the buttons above the plot
+    draw_selected_sst_plot <- function(res) {
+      if (identical(input$sst_plot_view, "kssl")) {
+        ref <- sst_kssl_reference(); req(ref)
+        draw_sst_kssl_plot(res, ref)
+      } else {
+        draw_sst_plot(res)
+      }
+    }
+
     output$sst_plot <- renderPlot({
       res <- sst_result(); req(res)
-      draw_sst_plot(res)
+      # draw_sst_plot(res)
+      draw_selected_sst_plot(res)
     })
 
     output$download_sst_jpg <- downloadHandler(
-      filename = function() paste0("calibration_transfer_", Sys.Date(), ".jpg"),
+      # filename = function() paste0("calibration_transfer_", Sys.Date(), ".jpg"),
+      filename = function() {
+        view <- if (identical(input$sst_plot_view, "kssl")) "_vs_KSSL" else ""
+        paste0("calibration_transfer", view, "_", Sys.Date(), ".jpg")
+      },
       content = function(file) {
         jpeg(file, width = 1920, height = 1080, units = "px", quality = 95)
-        draw_sst_plot(sst_result())
-        dev.off()
+        on.exit(dev.off())
+        # draw_sst_plot(sst_result())
+        draw_selected_sst_plot(sst_result())
       }
     )
 
@@ -1205,6 +1292,12 @@ dataAggregationServer <- function(id, shared, session) {
           full_screen = TRUE,
           card_header = "Calibration Transfer Plot",
           card_body(
+            # Switch between the before/after plot and the KSSL comparison
+            shinyWidgets::radioGroupButtons(
+              ns("sst_plot_view"), label = NULL,
+              choices = c("Before vs After" = "transfer", "Compare with KSSL" = "kssl"),
+              selected = "transfer", size = "sm"
+            ),
             plotOutput(ns("sst_plot")),
             downloadButton(ns("download_sst_jpg"), "Download Calibration Transfer JPG")
           )
@@ -1559,3 +1652,22 @@ dataAggregationServer <- function(id, shared, session) {
     })
   })
 }
+
+# ---- KSSL reference for the calibration transfer comparison plot ------------
+# Mean and SD of one property's KSSL calibration spectra (already SG ->
+# resample -> SNV preprocessed; the same data the Static Models spectral plot
+# uses), loaded through the shared calibration cache (calibration_data.R).
+# Memoised so the SD is computed once per app process; errors aren't cached.
+SST_KSSL_REFERENCE_PROPERTY <- "TC"
+SST_KSSL_REFERENCE_LABEL    <- "Total Carbon"
+
+kssl_reference_summary <- memoise::memoise(function(property) {
+  snv <- load_calibration(property)$snv
+  if (is.null(snv) || nrow(snv) == 0) stop("no calibration data for ", property)
+  list(
+    label = SST_KSSL_REFERENCE_LABEL,
+    n     = nrow(snv),
+    mean  = colMeans(snv, na.rm = TRUE),
+    sd    = apply(snv, 2, sd, na.rm = TRUE)
+  )
+})
