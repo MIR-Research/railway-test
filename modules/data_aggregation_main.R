@@ -205,7 +205,8 @@ dataAggregationUI <- function(id) {
         uiOutput(ns("sg_card")),
         uiOutput(ns("resample_card")),
         uiOutput(ns("snv_card")),
-        uiOutput(ns("sst_card"))
+        # uiOutput(ns("sst_card")),
+        sst_card_ui(ns)
       )
     )
   )
@@ -1186,6 +1187,7 @@ dataAggregationServer <- function(id, shared, session) {
       par(cex.main = 1.8, cex.lab = 1.4, cex.axis = 1.2, mar = c(5, 5, 4, 2))
 
       y_range <- range(c(mean_B + sd_B, mean_B - sd_B, mean_A + sd_A, mean_A - sd_A), na.rm = TRUE)
+      y_range[2] <- y_range[2] + 0.25 * diff(y_range)   # room for the legend above the data
       draw_band <- function(m, s, col) {
         polygon(c(wav, rev(wav)), c(m + s, rev(m - s)),
                 col = adjustcolor(col, alpha.f = 0.15), border = NA)
@@ -1221,6 +1223,7 @@ dataAggregationServer <- function(id, shared, session) {
       par(cex.main = 1.8, cex.lab = 1.4, cex.axis = 1.2, mar = c(5, 5, 4, 2))
 
       y_range <- range(c(ref_mean + ref_sd, ref_mean - ref_sd, mean_B, mean_A), na.rm = TRUE)
+      y_range[2] <- y_range[2] + 0.25 * diff(y_range)   # room for the legend above the data
       plot(wav, ref_mean, type = "n",
            xlim = rev(range(wav)), ylim = y_range,
            main = paste0("Calibration Transfer vs KSSL Reference (", ref$label, ")"),
@@ -1252,58 +1255,104 @@ dataAggregationServer <- function(id, shared, session) {
       )
     }
 
-    # Draws whichever view is selected with the buttons above the plot
-    draw_selected_sst_plot <- function(res) {
-      if (identical(input$sst_plot_view, "kssl")) {
-        ref <- sst_kssl_reference(); req(ref)
-        draw_sst_kssl_plot(res, ref)
-      } else {
-        draw_sst_plot(res)
-      }
-    }
+    # Each view now has its own tab, plot and download (see sst_card below),
+    # so this switch is no longer needed.
+    # # Draws whichever view is selected with the buttons above the plot
+    # draw_selected_sst_plot <- function(res) {
+    #   if (identical(input$sst_plot_view, "kssl")) {
+    #     ref <- sst_kssl_reference(); req(ref)
+    #     draw_sst_kssl_plot(res, ref)
+    #   } else {
+    #     draw_sst_plot(res)
+    #   }
+    # }
 
     output$sst_plot <- renderPlot({
       res <- sst_result(); req(res)
-      # draw_sst_plot(res)
-      draw_selected_sst_plot(res)
+      draw_sst_plot(res)
+    })
+
+    output$sst_kssl_plot <- renderPlot({
+      res <- sst_result(); req(res)
+      ref <- sst_kssl_reference(); req(ref)
+      draw_sst_kssl_plot(res, ref)
     })
 
     output$download_sst_jpg <- downloadHandler(
-      # filename = function() paste0("calibration_transfer_", Sys.Date(), ".jpg"),
-      filename = function() {
-        view <- if (identical(input$sst_plot_view, "kssl")) "_vs_KSSL" else ""
-        paste0("calibration_transfer", view, "_", Sys.Date(), ".jpg")
-      },
+      filename = function() paste0("calibration_transfer_", Sys.Date(), ".jpg"),
       content = function(file) {
         jpeg(file, width = 1920, height = 1080, units = "px", quality = 95)
         on.exit(dev.off())
-        # draw_sst_plot(sst_result())
-        draw_selected_sst_plot(sst_result())
+        draw_sst_plot(sst_result())
       }
     )
 
-    output$sst_card <- renderUI({
+    output$download_sst_kssl_jpg <- downloadHandler(
+      filename = function() paste0("calibration_transfer_vs_KSSL_", Sys.Date(), ".jpg"),
+      content = function(file) {
+        ref <- sst_kssl_reference(); req(ref)
+        jpeg(file, width = 1920, height = 1080, units = "px", quality = 95)
+        on.exit(dev.off())
+        draw_sst_kssl_plot(sst_result(), ref)
+      }
+    )
+
+    # The calibration transfer card is now in the page UI (see
+    # sst_card_ui() at the bottom of this file) and shown with a
+    # conditionalPanel when this flag is TRUE. Built here with renderUI, its
+    # tabs got Bootstrap 3 markup: the old view buttons did not respond to
+    # clicks and the tab labels did not pick up the site styling.
+    output$sst_done <- reactive({
       req(input$start)
-      c <- last_cfg()
-      if (!isTRUE(c$sst)) return(NULL)
-      tagList(
-        br(),
-        card(
-          full_screen = TRUE,
-          card_header = "Calibration Transfer Plot",
-          card_body(
-            # Switch between the before/after plot and the KSSL comparison
-            shinyWidgets::radioGroupButtons(
-              ns("sst_plot_view"), label = NULL,
-              choices = c("Before vs After" = "transfer", "Compare with KSSL" = "kssl"),
-              selected = "transfer", size = "sm"
-            ),
-            plotOutput(ns("sst_plot")),
-            downloadButton(ns("download_sst_jpg"), "Download Calibration Transfer JPG")
-          )
-        )
-      )
+      isTRUE(last_cfg()$sst)
     })
+    outputOptions(output, "sst_done", suspendWhenHidden = FALSE)
+
+    # output$sst_card <- renderUI({
+    #   req(input$start)
+    #   c <- last_cfg()
+    #   if (!isTRUE(c$sst)) return(NULL)
+    #   # tagList(
+    #   #   br(),
+    #   #   card(
+    #   #     full_screen = TRUE,
+    #   #     card_header = "Calibration Transfer Plot",
+    #   #     card_body(
+    #   #       # Switch between the before/after plot and the KSSL comparison
+    #   #       shinyWidgets::radioGroupButtons(
+    #   #         ns("sst_plot_view"), label = NULL,
+    #   #         choices = c("Before vs After" = "transfer", "Compare with KSSL" = "kssl"),
+    #   #         selected = "transfer", size = "sm"
+    #   #       ),
+    #   #       plotOutput(ns("sst_plot")),
+    #   #       downloadButton(ns("download_sst_jpg"), "Download Calibration Transfer JPG")
+    #   #     )
+    #   #   )
+    #   # )
+    #   # Tabs switch between the before/after plot and the KSSL comparison.
+    #   # (The radioGroupButtons above didn't respond to clicks: built inside
+    #   # renderUI they got Bootstrap 3 markup this Bootstrap 5 page can't use.)
+    #   # The KSSL plot is only drawn, and its reference loaded, when its tab
+    #   # is opened.
+    #   tagList(
+    #     br(),
+    #     # Same tab style as the Static Models property tabs
+    #     navset_card_tab(
+    #       id = ns("sst_plot_view"),
+    #       full_screen = TRUE,
+    #       nav_panel(
+    #         "Before vs After", value = "transfer",
+    #         plotOutput(ns("sst_plot")),
+    #         downloadButton(ns("download_sst_jpg"), "Download Calibration Transfer JPG")
+    #       ),
+    #       nav_panel(
+    #         "Compare with KSSL", value = "kssl",
+    #         plotOutput(ns("sst_kssl_plot")),
+    #         downloadButton(ns("download_sst_kssl_jpg"), "Download KSSL Comparison JPG")
+    #       )
+    #     )
+    #   )
+    # })
 
     # inside dataAggregationServer(), right after you define the outputs
     # sst_plot is left out: drawing it before its card is on the page made
@@ -1671,3 +1720,30 @@ kssl_reference_summary <- memoise::memoise(function(property) {
     sd    = apply(snv, 2, sd, na.rm = TRUE)
   )
 })
+
+
+# ---- Calibration transfer plot card (Data Preprocessing page) ---------------
+# Tabs switch between the before/after plot and the KSSL comparison, in the
+# same style as the Static Models property tabs. Hidden until a run with
+# calibration transfer finishes (output$sst_done in the server). The KSSL plot
+# is only drawn, and its reference loaded, when its tab is opened.
+sst_card_ui <- function(ns) {
+  conditionalPanel(
+    condition = sprintf("output['%s']", ns("sst_done")),
+    br(),
+    navset_card_tab(
+      id = ns("sst_plot_view"),
+      full_screen = TRUE,
+      nav_panel(
+        "Before vs After", value = "transfer",
+        plotOutput(ns("sst_plot")),
+        downloadButton(ns("download_sst_jpg"), "Download Calibration Transfer JPG")
+      ),
+      nav_panel(
+        "Compare with KSSL", value = "kssl",
+        plotOutput(ns("sst_kssl_plot")),
+        downloadButton(ns("download_sst_kssl_jpg"), "Download KSSL Comparison JPG")
+      )
+    )
+  )
+}
