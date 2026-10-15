@@ -116,6 +116,12 @@ dataAggregationUI <- function(id) {
               label = "Filter Out Negative Values (Recommended)",
               value = TRUE
             ),
+            # The snip happens in fil_df(), right after the negative-value
+            # filter, whether or not the filter is ticked
+            tags$small(
+              class = "text-muted d-block mb-3",
+              "Next, spectra are snipped to 4000–600 cm⁻¹ (always applied)."
+            ),
             checkboxInput(
               ns("averaged"),
               "Average Replicates",
@@ -271,6 +277,19 @@ dataAggregationServer <- function(id, shared, session) {
         shinyjs::disable("p")
         shinyjs::disable("resample_val")
         shinyjs::disable("snv")
+
+        # Show the default settings again after switching back from Custom
+        # (processing already used these; the controls kept the custom
+        # values, just greyed out). Same values as cfg() uses for Default.
+        updateCheckboxInput(session, "filtered", value = TRUE)
+        updateCheckboxInput(session, "averaged", value = TRUE)
+        updateCheckboxInput(session, "sg", value = TRUE)
+        updateSelectInput(session, "m", selected = 0)
+        updateSelectInput(session, "w", selected = 13)
+        updateSelectInput(session, "p", selected = 2)
+        updateCheckboxInput(session, "resampled", value = TRUE)
+        updateSliderInput(session, "resample_val", value = 10)
+        updateCheckboxInput(session, "snv", value = TRUE)
       } else {
         shinyjs::disable("aggregated")
         shinyjs::enable("averaged")
@@ -591,11 +610,30 @@ dataAggregationServer <- function(id, shared, session) {
         # quick progress for CSV path
         withProgress(message = "Loading aggregated CSV…", value = 0, {
           incProgress(0.4, detail = "Reading file…")
-          df <- read.csv(input$partial_data$datapath, check.names = FALSE)
+          # df <- read.csv(input$partial_data$datapath, check.names = FALSE)
+          # incProgress(0.4, detail = "Validating columns…")
+          #
+          # wns <- as.numeric(colnames(df)[-1])
+          # if (any(is.na(wns))) stop("CSV column names must all be numeric wavenumbers")
+          # The stop() above ended the user's session (grey screen). The file
+          # is now checked first (validate_aggregated_csv(), bottom of this
+          # file); a bad file shows an error and preprocessing stops there.
+          error_message("")
+          chk <- validate_aggregated_csv(input$partial_data$datapath)
           incProgress(0.4, detail = "Validating columns…")
-          
+          if (!chk$ok) {
+            msg <- paste("Preprocessing stopped, the file is not in the expected format.", chk$error)
+            error_message(msg)
+            showNotification(msg, type = "error", duration = NULL)
+            return(NULL)
+          }
+          df <- chk$df
+          if (chk$n_fixed_x > 0) {
+            showNotification(sprintf("Removed a leading \"X\" from %d column names so they are plain wavenumbers.",
+                                     chk$n_fixed_x), type = "message")
+          }
+
           wns <- as.numeric(colnames(df)[-1])
-          if (any(is.na(wns))) stop("CSV column names must all be numeric wavenumbers")
           rv$start_seq_csv <- min(wns)
           rv$stop_seq_csv  <- max(wns)
           
@@ -1746,4 +1784,81 @@ sst_card_ui <- function(ns) {
       )
     )
   )
+}
+
+
+# ---- Aggregated CSV format check (Data Preprocessing page) ------------------
+# Checks an uploaded aggregated CSV before any preprocessing runs, so a file
+# in the wrong format gives a clear error instead of crashing the session.
+# Expected layout: first column = sample IDs, every other column = one
+# wavenumber (numeric column name), values = numeric absorbance.
+# Also removes a leading "X" from numeric column names ("X4000.5" ->
+# "4000.5"), which some tools add when they save numeric headers.
+# Returns list(ok = TRUE, df, n_fixed_x) or list(ok = FALSE, error).
+validate_aggregated_csv <- function(path, min_wavenumbers = 20) {
+  fail <- function(...) list(ok = FALSE, error = paste0(...))
+  show_some <- function(x, n = 5) {
+    x <- unique(x)
+    paste0(paste0('"', head(x, n), '"', collapse = ", "),
+           if (length(x) > n) sprintf(" (and %d more)", length(x) - n) else "")
+  }
+
+  df <- tryCatch(read.csv(path, check.names = FALSE, stringsAsFactors = FALSE),
+                 error = function(e) e)
+  if (inherits(df, "error")) {
+    return(fail("The file could not be read as a CSV: ", conditionMessage(df)))
+  }
+  if (ncol(df) < 2) {
+    return(fail("The file needs a sample ID column followed by wavenumber columns, ",
+                "but only ", ncol(df), " column was found. Check that it is comma-separated."))
+  }
+  if (nrow(df) == 0) return(fail("The file has column names but no sample rows."))
+
+  # Leading "X" on numeric column names (e.g. "X4000" or "x3998.07")
+  nm <- names(df)
+  has_x <- grepl("^[Xx][0-9]*[.]?[0-9]+$", nm)
+  names(df)[has_x] <- substring(nm[has_x], 2)
+  n_fixed_x <- sum(has_x[-1])
+
+  # First column must be sample IDs, not a wavenumber
+  if (!is.na(suppressWarnings(as.numeric(names(df)[1])))) {
+    return(fail("The first column should contain sample IDs, but its name (\"", names(df)[1],
+                "\") is a number. Add a sample ID column as the first column."))
+  }
+
+  # Every other column must be a wavenumber
+  wn <- suppressWarnings(as.numeric(names(df)[-1]))
+  bad <- names(df)[-1][is.na(wn)]
+  if (length(bad) > 0) {
+    return(fail("After the sample ID column, every column name must be a wavenumber (a number). ",
+                "These are not: ", show_some(bad), "."))
+  }
+  if (anyDuplicated(wn)) {
+    return(fail("Some wavenumbers appear more than once: ", show_some(names(df)[-1][duplicated(wn)]), "."))
+  }
+  if (length(wn) < min_wavenumbers) {
+    return(fail("Only ", length(wn), " wavenumber columns were found; at least ",
+                min_wavenumbers, " are needed for preprocessing."))
+  }
+
+  # Spectral values must be numeric and not missing
+  for (j in seq_along(df)[-1]) {
+    if (!is.numeric(df[[j]])) {
+      v <- trimws(as.character(df[[j]]))
+      num <- suppressWarnings(as.numeric(v))
+      non_num <- !is.na(v) & v != "" & is.na(num)
+      if (any(non_num)) {
+        return(fail("Column \"", names(df)[j], "\" contains values that are not numbers, e.g. ",
+                    show_some(v[non_num], 3), "."))
+      }
+      df[[j]] <- num
+    }
+  }
+  missing_rows <- which(rowSums(is.na(df[, -1, drop = FALSE])) > 0)
+  if (length(missing_rows) > 0) {
+    return(fail("Some samples have empty spectral values: ",
+                show_some(as.character(df[[1]][missing_rows])), ". Remove or complete these rows."))
+  }
+
+  list(ok = TRUE, df = df, n_fixed_x = n_fixed_x)
 }
