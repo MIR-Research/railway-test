@@ -225,29 +225,85 @@ byo_train_model <- function(data, train_type, do_pca, var_thresh, train_percent,
   
   #CNN Model training, should probably be 1d but do more research
   
+  # Keras 3 note: the R keras package installed (2.x) predates the Keras 3
+  # Python library, and doesn't recognise Keras 3 model objects. So
+  # layer_*(model), fit(model) and predict(model) fail ("Only input tensors
+  # may be passed as positional arguments"). The network is now built,
+  # trained and run through Keras's Python interface instead, with the same
+  # layers and settings as before (old code kept in comments).
   build_cnn <- function(n_features) {
-    
-    model <- keras_model_sequential()
-    model %>% layer_conv_1d(filters = 32, kernel_size = 3,
-                            activation = "relu",
-                            input_shape = c(n_features, 1))
-    model %>% layer_batch_normalization()
-    model %>% layer_max_pooling_1d(pool_size = 2)
-    model %>% layer_conv_1d(filters = 64, kernel_size = 5,
-                            activation = "relu")
-    model %>% layer_batch_normalization()
-    model %>% layer_max_pooling_1d(pool_size = 2)
-    model %>% layer_flatten()
-    model %>% layer_dense(units = 128, activation = "relu")
-    model %>% layer_dropout(rate = 0.2)
-    model %>% layer_dense(units = 1, activation = "linear")
-    
-    compile(model,
-            loss      = "mse",
-            optimizer = "adam",
-            metrics   = "mean_absolute_error")
-    
+
+    # model <- keras_model_sequential()
+    # model %>% layer_conv_1d(filters = 32, kernel_size = 3,
+    #                         activation = "relu",
+    #                         input_shape = c(n_features, 1))
+    # model %>% layer_batch_normalization()
+    # model %>% layer_max_pooling_1d(pool_size = 2)
+    # model %>% layer_conv_1d(filters = 64, kernel_size = 5,
+    #                         activation = "relu")
+    # model %>% layer_batch_normalization()
+    # model %>% layer_max_pooling_1d(pool_size = 2)
+    # model %>% layer_flatten()
+    # model %>% layer_dense(units = 128, activation = "relu")
+    # model %>% layer_dropout(rate = 0.2)
+    # model %>% layer_dense(units = 1, activation = "linear")
+    #
+    # compile(model,
+    #         loss      = "mse",
+    #         optimizer = "adam",
+    #         metrics   = "mean_absolute_error")
+
+    k <- reticulate::import("keras")
+    model <- k$Sequential(list(
+      k$Input(shape = reticulate::tuple(as.integer(n_features), 1L)),
+      k$layers$Conv1D(filters = 32L, kernel_size = 3L, activation = "relu"),
+      k$layers$BatchNormalization(),
+      k$layers$MaxPooling1D(pool_size = 2L),
+      k$layers$Conv1D(filters = 64L, kernel_size = 5L, activation = "relu"),
+      k$layers$BatchNormalization(),
+      k$layers$MaxPooling1D(pool_size = 2L),
+      k$layers$Flatten(),
+      k$layers$Dense(units = 128L, activation = "relu"),
+      k$layers$Dropout(rate = 0.2),
+      k$layers$Dense(units = 1L, activation = "linear")
+    ))
+    model$compile(loss      = "mse",
+                  optimizer = "adam",
+                  metrics   = list("mean_absolute_error"))
+
     model
+  }
+
+  # Train with early stopping (same settings as callback_early_stopping()
+  # before; it monitored "val_loss" by default)
+  cnn_fit <- function(model, x, y, epochs, validation_data) {
+    k <- reticulate::import("keras")
+    model$fit(
+      # as.array(): a plain R vector reaches Python as a list, which Keras 3
+      # rejects ("Unrecognized data type"); a 1-d array becomes a NumPy array
+      x, as.array(as.numeric(y)),
+      epochs     = as.integer(epochs),
+      batch_size = 32L,
+      callbacks  = list(
+        k$callbacks$EarlyStopping(monitor = "val_loss", patience = 15L, min_delta = 0.001,
+                                  restore_best_weights = TRUE)
+      ),
+      validation_data = reticulate::tuple(validation_data[[1]],
+                                          as.array(as.numeric(validation_data[[2]]))),
+      verbose = 0L
+    )
+  }
+
+  # Predict by calling the model directly in batches. Keras's predict()
+  # starts an extra thread pool sized from the host's CPU count, which
+  # crashed CNN predictions on Railway (see data_input_main.R).
+  cnn_predict <- function(model, x_arr, batch_size = 1024L) {
+    n <- dim(x_arr)[1]
+    starts <- seq(1, n, by = batch_size)
+    unlist(lapply(starts, function(s) {
+      rows <- s:min(n, s + batch_size - 1)
+      as.numeric(model(x_arr[rows, , , drop = FALSE], training = FALSE)$numpy())
+    }))
   }
   
   
@@ -298,20 +354,23 @@ byo_train_model <- function(data, train_type, do_pca, var_thresh, train_percent,
       x_tr_arr <- array_reshape(x_tr, c(nrow(x_tr), n_features, 1))
       x_va_arr <- array_reshape(x_va, c(nrow(x_va), n_features, 1))
       
-      history <- model %>% fit(
-        x_tr_arr, y_tr,
-        epochs = 5,
-        batch_size = 32,
-        callbacks = list(
-          callback_early_stopping(patience = 15, min_delta = 0.001,
-                                  restore_best_weights = TRUE)
-        ),
-        validation_data = list(x_va_arr, y_va),
-        verbose = 0
-      )
-      
+      # history <- model %>% fit(
+      #   x_tr_arr, y_tr,
+      #   epochs = 5,
+      #   batch_size = 32,
+      #   callbacks = list(
+      #     callback_early_stopping(patience = 15, min_delta = 0.001,
+      #                             restore_best_weights = TRUE)
+      #   ),
+      #   validation_data = list(x_va_arr, y_va),
+      #   verbose = 0
+      # )
+      history <- cnn_fit(model, x_tr_arr, y_tr, epochs = 5,
+                         validation_data = list(x_va_arr, y_va))
+
       ## 2b. predict the validation fold
-      pred_va <- as.numeric(model %>% predict(x_va_arr))
+      # pred_va <- as.numeric(model %>% predict(x_va_arr))
+      pred_va <- cnn_predict(model, x_va_arr)
       rmse_vec[i] <- sqrt(mean((pred_va - y_va)^2))
       r2_vec[i]   <- cor(pred_va, y_va)^2
       
@@ -330,21 +389,25 @@ byo_train_model <- function(data, train_type, do_pca, var_thresh, train_percent,
     x_train_full_arr <- array_reshape(x_train_full,
                                       c(nrow(x_train_full), n_features, 1))
     
-    final_history <- final_model %>% fit(
-      x_train_full_arr, y_train_full,
-      validation_data = list(x_test_arr, y_test),
-      epochs = 100,
-      batch_size = 32,
-      callbacks = list(
-        callback_early_stopping(patience = 15, min_delta = 0.001,
-                                restore_best_weights = TRUE)
-      ),
-      verbose = 0
-    )
-    
+    # final_history <- final_model %>% fit(
+    #   x_train_full_arr, y_train_full,
+    #   validation_data = list(x_test_arr, y_test),
+    #   epochs = 100,
+    #   batch_size = 32,
+    #   callbacks = list(
+    #     callback_early_stopping(patience = 15, min_delta = 0.001,
+    #                             restore_best_weights = TRUE)
+    #   ),
+    #   verbose = 0
+    # )
+    final_history <- cnn_fit(final_model, x_train_full_arr, y_train_full, epochs = 100,
+                             validation_data = list(x_test_arr, y_test))
+
     ## ---- 4.  usual hold-out metrics ----
-    pred_tr <- as.numeric(final_model %>% predict(x_train_full_arr))
-    pred_ts <- as.numeric(final_model %>% predict(x_test_arr))
+    # pred_tr <- as.numeric(final_model %>% predict(x_train_full_arr))
+    # pred_ts <- as.numeric(final_model %>% predict(x_test_arr))
+    pred_tr <- cnn_predict(final_model, x_train_full_arr)
+    pred_ts <- cnn_predict(final_model, x_test_arr)
     err <- computeErrorMetrics_CNN(pred_tr, y_train_full, pred_ts, y_test)
     
     ## ---- 5.  add CV summary to the metric list ----
@@ -646,7 +709,9 @@ byo_train_model <- function(data, train_type, do_pca, var_thresh, train_percent,
 
     # Keras models can't be sent back to the app process; save to disk instead
     if (train_type == "CNN" && !is.null(model_obj$keras_model)) {
-      save_model_tf(model_obj$keras_model, cnn_model_file)
+      # save_model_tf(model_obj$keras_model, cnn_model_file)
+      # Keras 3 native format (a single .keras file)
+      model_obj$keras_model$save(cnn_model_file)
       model_obj$keras_model      <- NULL
       model_obj$keras_model_file <- cnn_model_file
     }

@@ -132,7 +132,18 @@ customModelServer <- function(id, shared) {
       } 
       else if(file_ext %in% c("keras", "h5")) {
         tryCatch({
-          lv$model <- load_model_hdf5(input$modelFile$datapath)
+          # lv$model <- load_model_hdf5(input$modelFile$datapath)
+          # Keras picks the file format from the extension (".h5" = legacy
+          # HDF5, ".keras" = Keras 3 zip), but older models were often saved
+          # as HDF5 under a ".keras" name (like the Static Models CNNs). So
+          # check the file's actual format and give the copy the matching
+          # extension. compile = FALSE: only predictions are needed, and it
+          # avoids Keras 3 errors on old training settings.
+          sig <- readBin(input$modelFile$datapath, "raw", n = 4)
+          ext <- if (identical(sig, as.raw(c(0x89, 0x48, 0x44, 0x46)))) ".h5" else ".keras"
+          model_path <- tempfile(fileext = ext)
+          file.copy(input$modelFile$datapath, model_path)
+          lv$model <- keras::load_model_hdf5(model_path, compile = FALSE)
           lv$model_type <- "keras"
           cat("Keras model loaded successfully.\n")
           showNotification("Keras model loaded successfully.", type = "message")
@@ -301,7 +312,19 @@ customModelServer <- function(id, shared) {
             }
           } else if(lv$model_type == "keras"){
             # For keras models, convert the data to a matrix before prediction
-            predictions <- round(predict(lv$model, as.matrix(processed_data)), 2)
+            # predictions <- round(predict(lv$model, as.matrix(processed_data)), 2)
+            # R's predict() doesn't work with Keras 3 models here (see
+            # model_training.R). Reshape to (samples, features, 1), the input
+            # the app's CNNs take, and call the model directly in batches
+            # (Keras's own predict() also starts an extra thread pool sized
+            # from the host's CPU count).
+            x <- as.matrix(processed_data)
+            x <- keras::array_reshape(x, c(nrow(x), ncol(x), 1))
+            starts <- seq(1, nrow(x), by = 1024)
+            predictions <- round(unlist(lapply(starts, function(s) {
+              rows <- s:min(nrow(x), s + 1023)
+              as.numeric(lv$model(x[rows, , , drop = FALSE], training = FALSE)$numpy())
+            })), 2)
           } else {
             stop("Unknown model type.")
           }

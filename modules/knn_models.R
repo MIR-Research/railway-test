@@ -95,37 +95,82 @@ knn_train_and_predict <- function(train_data, user_matrix, user_spectra, model_t
     data <- trainData[, !(names(trainData) %in% res_var)]
     Y <- trainData[[res_var]]
     n_features <- ncol(data)
-    model <- keras_model_sequential()
-    model <- layer_conv_1d(model, filters = 32, kernel_size = 3, activation = 'relu',
-                           input_shape = c(n_features, 1))
-    model <- layer_batch_normalization(model)
-    model <- layer_max_pooling_1d(model, pool_size = 2)
-    model <- layer_conv_1d(model, filters = 64, kernel_size = 5, activation = 'relu')
-    model <- layer_batch_normalization(model)
-    model <- layer_max_pooling_1d(model, pool_size = 2)
-    model <- layer_flatten(model)
-    model <- layer_dense(model, units = 128, activation = 'relu')
-    model <- layer_dropout(model, rate = 0.2)
-    model <- layer_dense(model, units = 1, activation = "linear")
-
-    compile(model,
-            loss = "mse",
-            optimizer = "adam",
-            metrics = c("mean_absolute_error"))
+    # Keras 3 note: the R keras package installed (2.x) predates the Keras 3
+    # Python library and doesn't recognise its model objects, so
+    # layer_*(model), fit(model) and predict(model) fail ("Only input tensors
+    # may be passed as positional arguments"). The network is now built and
+    # trained through Keras's Python interface, with the same layers and
+    # settings (old code kept in comments).
+    # model <- keras_model_sequential()
+    # model <- layer_conv_1d(model, filters = 32, kernel_size = 3, activation = 'relu',
+    #                        input_shape = c(n_features, 1))
+    # model <- layer_batch_normalization(model)
+    # model <- layer_max_pooling_1d(model, pool_size = 2)
+    # model <- layer_conv_1d(model, filters = 64, kernel_size = 5, activation = 'relu')
+    # model <- layer_batch_normalization(model)
+    # model <- layer_max_pooling_1d(model, pool_size = 2)
+    # model <- layer_flatten(model)
+    # model <- layer_dense(model, units = 128, activation = 'relu')
+    # model <- layer_dropout(model, rate = 0.2)
+    # model <- layer_dense(model, units = 1, activation = "linear")
+    #
+    # compile(model,
+    #         loss = "mse",
+    #         optimizer = "adam",
+    #         metrics = c("mean_absolute_error"))
+    k <- reticulate::import("keras")
+    model <- k$Sequential(list(
+      k$Input(shape = reticulate::tuple(as.integer(n_features), 1L)),
+      k$layers$Conv1D(filters = 32L, kernel_size = 3L, activation = "relu"),
+      k$layers$BatchNormalization(),
+      k$layers$MaxPooling1D(pool_size = 2L),
+      k$layers$Conv1D(filters = 64L, kernel_size = 5L, activation = "relu"),
+      k$layers$BatchNormalization(),
+      k$layers$MaxPooling1D(pool_size = 2L),
+      k$layers$Flatten(),
+      k$layers$Dense(units = 128L, activation = "relu"),
+      k$layers$Dropout(rate = 0.2),
+      k$layers$Dense(units = 1L, activation = "linear")
+    ))
+    model$compile(loss = "mse",
+                  optimizer = "adam",
+                  metrics = list("mean_absolute_error"))
 
     x <- as.matrix(data)
     x_array <- array_reshape(x, c(nrow(x), n_features, 1))
 
-    fit(model,
-        x_array, Y,
-        epochs = 50,
-        batch_size = 32,
-        callbacks = list(
-          callback_early_stopping(monitor = "loss", patience = 15, min_delta = 0.001,
-                                  restore_best_weights = TRUE)
-        ),
-        verbose = 0)
+    # fit(model,
+    #     x_array, Y,
+    #     epochs = 50,
+    #     batch_size = 32,
+    #     callbacks = list(
+    #       callback_early_stopping(monitor = "loss", patience = 15, min_delta = 0.001,
+    #                               restore_best_weights = TRUE)
+    #     ),
+    #     verbose = 0)
+    # as.array(): a plain R vector reaches Python as a list, which Keras 3
+    # rejects ("Unrecognized data type"); a 1-d array becomes a NumPy array
+    model$fit(x_array, as.array(as.numeric(Y)),
+              epochs = 50L,
+              batch_size = 32L,
+              callbacks = list(
+                k$callbacks$EarlyStopping(monitor = "loss", patience = 15L, min_delta = 0.001,
+                                          restore_best_weights = TRUE)
+              ),
+              verbose = 0L)
     list(model = model, pca = NULL, num_components = NA)
+  }
+
+  # Predict with the CNN by calling the model directly in batches (predict()
+  # doesn't work with Keras 3 here, see train_cnn; Keras's own predict()
+  # also starts an extra thread pool sized from the host's CPU count).
+  cnn_predict <- function(model, x_arr, batch_size = 1024L) {
+    n <- dim(x_arr)[1]
+    starts <- seq(1, n, by = batch_size)
+    unlist(lapply(starts, function(s) {
+      rows <- s:min(n, s + batch_size - 1)
+      as.numeric(model(x_arr[rows, , , drop = FALSE], training = FALSE)$numpy())
+    }))
   }
 
   model_labels <- c(rf = "Random Forest", svm = "SVM", cb = "Cubist",
@@ -156,7 +201,8 @@ knn_train_and_predict <- function(train_data, user_matrix, user_spectra, model_t
       pred_cols <- setdiff(names(train_data), res_var)
       xmat      <- as.matrix(train_data[, pred_cols, drop = FALSE])
       arr_train <- array_reshape(xmat, c(nrow(xmat), ncol(xmat), 1))
-      predict(modelResult$model, arr_train)
+      # predict(modelResult$model, arr_train)
+      cnn_predict(modelResult$model, arr_train)
     } else {
       pred_cols <- setdiff(names(train_data), res_var)
       predict(modelResult$model, newdata = train_data[, pred_cols, drop = FALSE])
@@ -210,7 +256,8 @@ knn_train_and_predict <- function(train_data, user_matrix, user_spectra, model_t
     if (inherits(x_array, "error")) {
       return(fail(paste("Error reshaping user data for CNN:", conditionMessage(x_array))))
     }
-    preds <- tryCatch(round(predict(modelResult$model, x_array), 2), error = function(e) e)
+    # preds <- tryCatch(round(predict(modelResult$model, x_array), 2), error = function(e) e)
+    preds <- tryCatch(round(cnn_predict(modelResult$model, x_array), 2), error = function(e) e)
     if (inherits(preds, "error")) {
       return(fail(paste("Error predicting with CNN model:", conditionMessage(preds))))
     }
