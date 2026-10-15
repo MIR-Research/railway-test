@@ -119,6 +119,9 @@ sapply(source_files, source)
 # Start the background training processes (modules/background_tasks.R). Done
 # here, after every module is loaded, because it uses parallel_training.R.
 start_background_trainer()
+# Start loading the error metrics in the background now, so they're ready by
+# the time someone opens the Error Metrics pop-up (error_metrics_main.R)
+refresh_error_metrics()
 
 # Define soil properties
 soilProperties <- list(

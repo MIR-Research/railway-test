@@ -1013,16 +1013,22 @@ modelTrainingServer <- function(id, shared, load_spectral_data_memo) {
       trainedPCA   <- reactiveVal(NULL)
       
       ###### 7. Plot Outputs ######
-      observeEvent(isTRUE(shared$trainModel == 1), {
-        req(isTRUE(shared$trainModel == 1))   # bail unless the flag is really set
-        req(shared$trainType)                 # bail unless a model type is chosen
-        doPCA <- if (shared$trainType %in% c("Partial Least Squares", "CNN")) {
-          FALSE
-        } else {
-          isTRUE(input$trainPCA)
-        }
+      # The plot used to be set up inside this observer, which only ran when
+      # shared$trainModel switched to 1. Since training moved to the
+      # background, the Train Model handler resets that flag in the same
+      # update, so the observer never ran and the plot stayed blank. The plot
+      # now always exists and draws once trainedModel() is set.
+      # observeEvent(isTRUE(shared$trainModel == 1), {
+      #   req(isTRUE(shared$trainModel == 1))   # bail unless the flag is really set
+      #   req(shared$trainType)                 # bail unless a model type is chosen
+      #   doPCA <- if (shared$trainType %in% c("Partial Least Squares", "CNN")) {
+      #     FALSE
+      #   } else {
+      #     isTRUE(input$trainPCA)
+      #   }
         output$trainedModelPlot <- renderPlot({
           mod <- trainedModel()
+          req(mod)
           df  <- if (is.data.frame(mod$pred_obs)) {
             mod$pred_obs                     # no-PCA case
           } else if (is.list(mod$model) &&
@@ -1054,10 +1060,10 @@ modelTrainingServer <- function(id, shared, load_spectral_data_memo) {
               panel.grid.minor = element_blank()
             )
         })
-        
-        
-      })
-      
+
+
+      # })
+
       output$trainedModelPCA <- renderPlot({
         req(trainedModel())
         mod <- trainedModel()

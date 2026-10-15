@@ -172,20 +172,116 @@ collect_error_csvs <- function(mapping, include_uncertainty = FALSE) {
 # next person to open the modal retries rather than getting a cached blank.
 error_metrics_cache_hours <- as.numeric(Sys.getenv("ERROR_METRICS_CACHE_HOURS", "12"))
 
-collect_error_csvs_cached <- memoise::memoise(function(mapping, include_uncertainty) {
-  df <- collect_error_csvs(mapping, include_uncertainty)
-  if (nrow(df) == 0) stop("no metric CSVs could be read from the bucket")
-  df
-}, cache = cachem::cache_mem(max_age = error_metrics_cache_hours * 3600))
+# Replaced by the background loading below: the first person to open the
+# modal after a deploy (or after the cache expired) had to wait for the whole
+# bucket load, and the main app process was blocked for every user meanwhile.
+# collect_error_csvs_cached <- memoise::memoise(function(mapping, include_uncertainty) {
+#   df <- collect_error_csvs(mapping, include_uncertainty)
+#   if (nrow(df) == 0) stop("no metric CSVs could be read from the bucket")
+#   df
+# }, cache = cachem::cache_mem(max_age = error_metrics_cache_hours * 3600))
+#
+# collect_error_csvs_shared <- function(mapping, include_uncertainty = FALSE) {
+#   tryCatch(
+#     collect_error_csvs_cached(mapping, include_uncertainty),
+#     error = function(e) {
+#       message("Error metrics load failed | ", conditionMessage(e))
+#       data.frame()
+#     }
+#   )
+# }
 
-collect_error_csvs_shared <- function(mapping, include_uncertainty = FALSE) {
-  tryCatch(
-    collect_error_csvs_cached(mapping, include_uncertainty),
-    error = function(e) {
+# ---- Background loading (shared by all sessions) -----------------------------
+# The metric and uncertainty tables are loaded together by one of the
+# background processes (background_tasks.R): first right after the app
+# starts (refresh_error_metrics() is called from app.R), then again whenever
+# the stored copy is older than ERROR_METRICS_CACHE_HOURS. While a refresh
+# runs, the previous copy keeps being shown; only before the very first load
+# finishes does the modal show "Loading error metrics...". If no background
+# process is available, the load runs in the app process, as before.
+
+# Reads both tables, and logs how long the bucket listing and downloads took
+load_error_metrics_all <- function() {
+  t0 <- Sys.time()
+  metrics     <- collect_error_csvs(error_metric_prefixes, include_uncertainty = FALSE)
+  t1 <- Sys.time()
+  uncertainty <- collect_error_csvs(uncertainty_prefixes, include_uncertainty = TRUE)
+  t2 <- Sys.time()
+  message(sprintf("Error metrics loaded: %d metric rows in %.1f s, %d uncertainty rows in %.1f s",
+                  nrow(metrics), as.numeric(difftime(t1, t0, units = "secs")),
+                  nrow(uncertainty), as.numeric(difftime(t2, t1, units = "secs"))))
+  list(metrics = metrics, uncertainty = uncertainty)
+}
+
+# $data: list(metrics, uncertainty, loaded_at) once loaded; $job: the running
+# background load, if any; $failed_at: when the last load failed
+error_metrics_store <- new.env(parent = emptyenv())
+error_metrics_retry_secs <- 60   # after a failed load, wait this long before retrying
+
+store_error_metrics <- function(res) {
+  error_metrics_store$job <- NULL
+  if (is.null(res$metrics) || nrow(res$metrics) == 0) {
+    # Keep any previous copy rather than replacing it with nothing
+    message("Error metrics load failed | no metric CSVs could be read from the bucket")
+    error_metrics_store$failed_at <- Sys.time()
+    return(invisible(NULL))
+  }
+  error_metrics_store$data <- list(metrics = res$metrics, uncertainty = res$uncertainty,
+                                   loaded_at = Sys.time())
+  error_metrics_store$failed_at <- NULL
+  invisible(NULL)
+}
+
+refresh_error_metrics <- function() {
+  if (!is.null(error_metrics_store$job)) return(invisible(NULL))   # already loading
+  failed_at <- error_metrics_store$failed_at
+  if (!is.null(failed_at) &&
+      difftime(Sys.time(), failed_at, units = "secs") < error_metrics_retry_secs) {
+    return(invisible(NULL))
+  }
+
+  if (isTRUE(background_training_available)) {
+    # The background process loads this file and bucket_helper.R into a
+    # scratch environment, then runs load_error_metrics_all()
+    files <- normalizePath(file.path("modules", c("bucket_helper.R", "error_metrics_main.R")),
+                           mustWork = TRUE)
+    job <- mirai::mirai({
+      e <- new.env()
+      for (f in files) sys.source(f, envir = e, keep.source = FALSE)
+      e$load_error_metrics_all()
+    }, files = files)
+    error_metrics_store$job <- job
+    promises::then(
+      promises::as.promise(job),
+      onFulfilled = store_error_metrics,
+      onRejected  = function(err) {
+        message("Error metrics load failed | ", conditionMessage(err))
+        error_metrics_store$job <- NULL
+        error_metrics_store$failed_at <- Sys.time()
+      }
+    )
+  } else {
+    res <- tryCatch(load_error_metrics_all(), error = function(e) {
       message("Error metrics load failed | ", conditionMessage(e))
-      data.frame()
-    }
-  )
+      list(metrics = data.frame(), uncertainty = data.frame())
+    })
+    store_error_metrics(res)
+  }
+  invisible(NULL)
+}
+
+# Returns the stored table for kind ("metrics" or "uncertainty"), starting a
+# refresh if it's missing or expired. NULL means the first load is still
+# running; an empty data frame means loading failed.
+get_error_metrics <- function(kind) {
+  data <- error_metrics_store$data
+  expired <- is.null(data) ||
+    difftime(Sys.time(), data$loaded_at, units = "hours") > error_metrics_cache_hours
+  if (expired) refresh_error_metrics()
+  data <- error_metrics_store$data   # a load without a background process finishes right away
+  if (!is.null(data)) return(data[[kind]])
+  if (!is.null(error_metrics_store$job)) return(NULL)
+  data.frame()
 }
 
 # Server function for error metrics module
@@ -205,7 +301,13 @@ errorMetricsServer <- function(id, shared) {
     }
     
     compileAllErrors <- reactive({
-      df <- collect_error_csvs_shared(error_metric_prefixes, include_uncertainty = FALSE)
+      # df <- collect_error_csvs_shared(error_metric_prefixes, include_uncertainty = FALSE)
+      df <- get_error_metrics("metrics")
+      if (is.null(df)) {
+        # The first background load is still running: check again shortly
+        invalidateLater(2000)
+        return(NULL)
+      }
       if (nrow(df) == 0) return(df)
       
       req_cols <- c("filename", "R2.val", "RMSE.val", "RPIQ.val", "RPD.val")
@@ -225,8 +327,9 @@ errorMetricsServer <- function(id, shared) {
     })
     
     compileAllUncertaintySD <- reactive({
-      df <- collect_error_csvs_shared(uncertainty_prefixes, include_uncertainty = TRUE)
-      if (nrow(df) == 0) return(df)
+      # df <- collect_error_csvs_shared(uncertainty_prefixes, include_uncertainty = TRUE)
+      df <- get_error_metrics("uncertainty")
+      if (is.null(df) || nrow(df) == 0) return(data.frame())
       
       df <- df[df$FileKind == "Summary Matrix", , drop = FALSE]
       if (!("stat" %in% names(df))) return(data.frame())
@@ -259,6 +362,7 @@ errorMetricsServer <- function(id, shared) {
     
     combinedData <- reactive({
       err_df <- compileAllErrors()
+      if (is.null(err_df)) return(NULL)   # still loading
       if (nrow(err_df) == 0) return(err_df)
       
       sd_df <- compileAllUncertaintySD()
@@ -279,8 +383,9 @@ errorMetricsServer <- function(id, shared) {
     
     filteredData <- reactive({
       df <- combinedData()
+      if (is.null(df)) return(NULL)   # still loading
       if (nrow(df) == 0) return(df)
-      
+
       prop <- shared$selectedProperty
       if (!is.null(prop) && prop != "") {
         # Old substring match; also showed other properties' rows (see
@@ -294,8 +399,9 @@ errorMetricsServer <- function(id, shared) {
     
     displayedData <- reactive({
       df <- filteredData()
+      if (is.null(df)) return(NULL)   # still loading
       if (nrow(df) == 0) return(df)
-      
+
       if (is.null(input$sort_method)) input$sort_method <- "best"
       
       if (input$sort_method == "best") {
@@ -334,6 +440,13 @@ errorMetricsServer <- function(id, shared) {
     
     output$error_table <- renderDT({
       df <- displayedData()
+      if (is.null(df)) {
+        return(datatable(
+          data.frame(Message = "Loading error metrics..."),
+          rownames = FALSE,
+          options = list(dom = "t")
+        ))
+      }
       if (nrow(df) == 0) {
         return(datatable(
           data.frame(Message = "No data found"),
