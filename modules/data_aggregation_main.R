@@ -96,7 +96,7 @@ dataAggregationUI <- function(id) {
           )
         ),
         card(
-          card_header("Custom Preprocessing Options"),
+          card_header("Preprocessing Options"),
           card_body(
             layout_column_wrap(
               checkboxInput(
