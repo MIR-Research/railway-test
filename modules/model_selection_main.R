@@ -117,7 +117,9 @@ modelSelectionUI <- function(id) {
                 "Convolutional Neural Network" = "CNN",
                 "Partial Least Squares" = "PLS"
               ),
-              selected = ""
+              selected = "",
+              # Draw the open list on top of the page, not clipped by the card
+              options = list(dropdownParent = "body")
             ),
             
             # Conditional panels for different model types
@@ -365,7 +367,11 @@ modelSelectionServer <- function(id, shared, soilPropertyName) {
         choices = c("Select your model" = "", choices),
         selected = NULL,
         multiple = FALSE,
-        options = list(placeholder = placeholder, plugins = "clear_button")
+        # dropdownParent = "body": draw the open list on top of the page.
+        # Inside the fixed-height card it was cut off at the card's bottom
+        # edge (only ~3 options visible) and covered Confirm Choices.
+        options = list(placeholder = placeholder, plugins = "clear_button",
+                       dropdownParent = "body")
       )
     })
     
