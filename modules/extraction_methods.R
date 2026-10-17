@@ -68,6 +68,25 @@ extraction_methodsServer <- function(id, shared) {
       Carbon_hmin= "6A4a1a1-3a3"
     )
     
+    # ---------- (2b) custom descriptions ----------
+    # Shown instead of the Analyte_Methods.csv rows for these property codes.
+    # (≥ = "greater than or equal" sign, µ = micro sign; written as
+    # escapes so this file stays plain ASCII.)
+    pom_maom_method <- tagList(
+      tags$p(tags$b("For the pom (POC) and maom (MAOC)")),
+      tags$p(paste0(
+        "To separate SOC fractions, soil samples were dispersed with a 0.5% sodium ",
+        "hexametaphosphate solution, followed by wet sieving to retain the ≥53 µm ",
+        "fraction (POC) (method 6A4a1a1-3a1), and POC concentration was determined by dry ",
+        "combustion. MAOC concentration was calculated as TC minus POC (method 6A4a1a1-3a3)."
+      ))
+    )
+    custom_method_lookup <- list(
+      C_hpom = pom_maom_method,
+      hpom   = pom_maom_method,
+      maom   = pom_maom_method
+    )
+
     # ---------- (3) property code -> PDF file ----------
     pdf_lookup <- setNames(rep("Kellogg_Lab_Manual.pdf",
                                length(property_lookup)),
@@ -121,19 +140,26 @@ extraction_methodsServer <- function(id, shared) {
     })
     
     # Render whenever property changes (including first time)
-    observeEvent(shared$extraction_method, ignoreInit = FALSE, {
+    # ignoreNULL = FALSE: also run when no property is selected (e.g. the
+    # Customized Model page's "Select a Soil Property"), so the card clears
+    # instead of keeping the previous property's methods
+    observeEvent(shared$extraction_method, ignoreInit = FALSE, ignoreNULL = FALSE, {
       # Only show on these pages
-      if (!isTRUE(shared$page_navbar %in% c("knn_model", "static_models"))) {
+      if (is.null(shared$extraction_method) ||
+          !isTRUE(shared$page_navbar %in% c("knn_model", "static_models"))) {
         output$extraction_methods <- renderUI({ NULL })
         return()
       }
       
       methods <- extraction_methods()
       link    <- pdf_file()
-      
+      custom  <- custom_method_lookup[[shared$extraction_method]]
+
       output$extraction_methods <- renderUI({
         tagList(
-          if (!is.null(methods) && nrow(methods) > 0) {
+          if (!is.null(custom)) {
+            custom
+          } else if (!is.null(methods) && nrow(methods) > 0) {
             tags$ul(
               lapply(seq_len(nrow(methods)), function(i) {
                 tags$li(HTML(paste0(

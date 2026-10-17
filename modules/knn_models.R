@@ -444,7 +444,12 @@ knnServer <- function(id, shared, load_spectral_data_memo) {
     })
     
     output$extraction_methods <- renderUI({
-      extraction_methodsUI("extraction_methods")
+      # extraction_methodsUI("extraction_methods")
+      # ns(): without it this card had the same ID as the Static Models
+      # card ("extraction_methods-extraction_methods"), so neither updated
+      # properly. With it, it matches extraction_methodsServer() below,
+      # which runs inside this module.
+      extraction_methodsUI(ns("extraction_methods"))
     })
     
     extraction_methodsServer("extraction_methods", shared)
