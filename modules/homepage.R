@@ -39,11 +39,11 @@ homePageUI <- function(id) {
         title = "About",
         value = "about",
         HTML("
-             <h1>Welcome to the MIR Soil Property Platform</h1>
+             <h1>Welcome to the MIR Soil Prediction Platform</h1>
              
              <p>The MIR Soil Property Platform is a user-friendly, fast, web-based platform for soil property estimation from MIR spectra.  After uploading MIR spectra, some preprocessing, and choosing and executing a prediction model, this platform will provide soil property estimates with a prediction accuracy. 
              <br>
-             <p>This web tool has four components :
+             <p>This platform has four components:
              <ul 'font-size: 22px;'>
              <li><strong>Data Preprocessing</strong> - Prepare and preprocess your spectral data for modeling
              <li><strong>Static models</strong> - Make soil property predictions using built-in models, developed using the USDA NRCS NSSC-KSSL mid-infrared (MIR) spectral library.
@@ -51,7 +51,7 @@ homePageUI <- function(id) {
              <li><strong>Build your own machine learning models</strong> - Develop and train custom models tailored to your dataset for advanced soil analytics. 
              </ul>
              <p>To access each component, use the dropdown menu under the <strong>Tools</strong> tab in the top-right corner of the page.
-             <p>Let MIR Soil-Analytics handle the modelling so that you can focus on results. 
+             <p>Let MIR Soil Prediction platform handle the modelling so that you can focus on results.
              <br>
              <p>Need help choosing the right tool for your dataset? Use our decision tree to navigate the web tool efficiently. Visit <strong>Which Tool is Right for Me? </strong> to get started!
              ")
@@ -85,14 +85,14 @@ homePageUI <- function(id) {
                    tabPanel(
                      "Data preprocessing",
                      value = "data_preprocessing",
-                     HTML("<p>You can upload either an OPUS (.0) file or a .CSV file. Once uploaded, you can select the preprocessing steps you need.</p>
+                     HTML("<p>You can upload either an OPUS (.0) file or a .CSV file.</p>
                <p> If you already have aggregated .csv file containing all spectral scans, including sample IDs and absorbance values organized by wavenumber,
                then go to the Aggregated CSV File tab to upload your file and begin preprocessing  
                <p> Detailed instructions for file formatting and uploading are provided in the Preprocessing tab.
                <p>If you are unsure about the quality of your spectral data, we recommend enabling Outlier Detection by checking the corresponding box. 
                Outliers are identified based on spectral similarity in PCA space, and any spectra falling outside the 96% similarity threshold are automatically excluded before preprocessing.
                <br>
-               <p> To use the Static Models, select the <strong>Default</strong> Preprocessing option. 
+               <p> To use the Static Models, or customize them using the Customized Model component, select the <strong>Default Preprocessing</strong> option.
                This option initiates a set of built-in steps designed to meet the requirements of the static prediction models. The following preprocessing steps are automatically applied:
                <li> Data aggregation, Filtering, and Spectral averaging </li>
                <li> Savitzky-Golay Smoothing – Applied using:<br>
@@ -102,21 +102,28 @@ homePageUI <- function(id) {
                <li>Resampling – Spectra are resampled at 10 cm⁻¹ intervals.</li>
                <li>Baseline correction/ Standard Normal Variate (SNV) transformation </li>
                (See details about these functions in the section below.)
-               <p>If you would like preprocessing spectral data tailored to your needs, click on the <strong>custom</strong> preprocessing. 
+               <li><strong>Optional: Calibration Transfer – Spectral Space Transformation (SST)</strong><br>
+                 Alpha II benchtop spectrometer with a front-reflectance module (Bruker Optics) → Vertex 70/HTS-XT (Bruker Optics / KSSL instrument)
+               </li>
+               <p>As explained in the Static Models section, the prediction models were developed using the KSSL spectral library, with spectra collected using a Bruker Vertex 70/HTS-XT instrument.</p>
+               <p>If your spectra were collected using a different instrument, particularly a Bruker Alpha II, instrumental differences may affect prediction accuracy. In such cases, you can select the Calibration Transfer (SST) option to transform your spectra to more closely resemble those collected using the KSSL instrument.</p>
+               <p>For more information about the preprocessing requirements, performance, and limitations of SST, refer to the Calibration Transfer – Spectral Space Transformation (SST) section below.</p>
+               <p>If you would like preprocessing spectral data tailored to your needs, click on the <strong>Custom Preprocessing</strong> option.
 
 
                      <ul style = 'font-family: Arimo;'>
                             <li>
                               <span style='font-size: 18px;'><strong>Aggregated Data</strong></span><br>
-                              All OPUS (.0) or .CSV files are combined into a single dataset. You can download this aggregated data for your own use.
+                              All OPUS (.0) or .CSV files in the zip file are combined into a single dataset. You can download this aggregated data for your own use.
                             </li>
                             <li>
                               <span style='font-size: 18px;'><strong>Filtered Data</strong></span><br>
                               The aggregated file is automatically processed. Any scans containing negative values are removed.
+                              After this step, the spectra are snipped to 4000 – 600 cm⁻¹, which is considered the MIR region (this is always applied).
                             </li>
                             <li>
                               <span style='font-size: 18px;'><strong>Averaged Data</strong></span><br>
-                              Since each soil sample is scanned multiple times, this step averages the scans to produce a single spectrum.<br>
+                              Since each soil sample is scanned multiple times for quality control, this step averages the scans to produce a single spectrum.<br>
                               <em>Ensure your sample IDs follow the required format (e.g. sampleID_rep, where rep is a numeric replicate number)</em>
                             </li>
                             <li>
@@ -126,7 +133,7 @@ homePageUI <- function(id) {
                               <u>How It Works</u> <br>
                               The SG filter moves a small window across the data and fits a polynomial curve to the values within that window. 
                               The center point is then replaced by the predicted value from the fitted curve. 
-                              Repeating this process across the entire dataset produces a smoothed version of the signal.<br>
+                              Repeating this process across the dataset produces a smoothed version of the signal.<br>
                               The filter depends on three parameters:
                               
                               
@@ -155,12 +162,14 @@ homePageUI <- function(id) {
                               </tbody>
                             </table>
                             <br>
-                            <u>Best Practices</u> <br>
-                            Start with the defaults and check if the result looks clean but not over-smoothed
-                            Avoid using a high-degree polynomial with a small window, as this can overfit noise<br>
-                            Use visual inspection to see whether fine-tuning is needed for modeling or interpretation<br>
+                            <u>Best Practices</u>
+                            <ul>
+                              <li>Start with the defaults and check if the result looks clean but not over-smoothed.</li>
+                              <li>Avoid using a high-degree polynomial with a small window, as this can overfit noise.</li>
+                              <li>Use visual inspection to see whether fine-tuning is needed for modeling or interpretation.</li>
+                            </ul>
                             The SG filter is an essential tool for improving signal quality while preserving meaningful structures of the spectral data.
-                            By choosing the parameters, you can improve data for further analysis and modeling.</li> <br>
+                            By choosing the parameters, you can improve the data for further analysis and modeling.</li> <br>
                             <li>
                               <span style='font-size: 18px;'><strong>Resampling</span></strong><br>
                               <u>Why Resample MIR Spectra?</u><br>
@@ -171,16 +180,44 @@ homePageUI <- function(id) {
                               Keep in mind : If you resample at large intervals, you lose important spectral features that are critical for modeling or interpretation.
                             </li>
                             <li>
-                              <span style='font-size: 18px;'><strong>Baseline correction</span></strong><br>
+                              <span style='font-size: 18px;'><strong>Standard Normal Variate (SNV) transformation</strong></span><br>
                               Standard Normal Variate (SNV) / Baseline Correction is a normalization technique used to correct unwanted variation in spectral data.
                               SNV transforms each spectrum so that it has a mean of 0 and a standard deviation of 1, making spectra more consistent and comparable.<br>
                               <u>Why Use SNV?</u><br>
-                              When MIR spectra are collected, soil samples can scatter light differently because of surface texture, particle size, or packing. This often results in vertical shifts (offsets in absorbance) and slope differences across spectra. These variations are unrelated to the actual chemical composition and that is why SNV becomes useful <br>
+                              When MIR spectra are collected, soil samples can scatter light differently because of surface texture, particle size, or packing. This often results in vertical shifts (offsets in absorbance) and slope differences across spectra. These variations are unrelated to the actual chemical composition, and that is why SNV becomes useful. <br>
                               SNV helps to reduce scatter effects, remove baseline offsets and slope variations, and make the spectra more comparable and interpretable.<br>
                               Improving signal clarity and consistency, SNV/baseline correction enhances the reliability of downstream analysis, and it is recommended preprocessing the MIR data up to the baseline correction step.
                             </li>
                             </ul>
                           </ol>
+
+                          <h4>How to Use Calibration Transfer – Spectral Space Transformation (SST)</h4>
+                          <p><strong>When should you use SST?</strong></p>
+                          <p>The prediction models (Static models) available on this platform were developed using the USDA–NRCS Kellogg Soil Survey Laboratory (KSSL) spectral library, with spectra collected using a Bruker Vertex 70/HTS-XT instrument (Bruker Optics).</p>
+                          <p>If your spectra were collected using a different instrument, differences in instrumental characteristics may introduce spectral variations and affect prediction accuracy.</p>
+                          <p>To minimize these differences, the platform provides a <strong>Spectral Space Transformation (SST)</strong> option. SST transforms spectra collected using the Alpha II (Bruker Optics) instrument to more closely resemble those collected using the KSSL Vertex 70/HTS-XT instrument, improving spectral compatibility with the existing prediction models.</p>
+
+                          <p><strong>Apply the required preprocessing.</strong></p>
+                          <p>Before using SST, your spectra need to be preprocessed using the same sequence as the platform's default preprocessing workflow. Or if you'd like to customize it, once your individual or aggregated spectral files are uploaded, make sure of doing:</p>
+                          <ol>
+                            <li><strong>Spectral range selection:</strong> 4000–600 cm⁻¹ (automatically selected by the application)</li>
+                            <li><strong>Savitzky–Golay (SG) smoothing:</strong> Window size = 13, polynomial order = 2</li>
+                            <li><strong>Spectral resampling:</strong> 10 cm⁻¹ intervals</li>
+                            <li><strong>Standard Normal Variate (SNV) normalization</strong></li>
+                          </ol>
+                          <p>These four preprocessing steps are <strong>required</strong> for SST compatibility. Filtering negative absorbance values and averaging replicate spectra are optional and are not mandatory for applying SST.</p>
+                          <p>After completing the required preprocessing, select the <strong>Spectral Space Transformation (SST)</strong> option to transform your spectra before applying the KSSL prediction models.</p>
+
+                          <p><strong>How effective is SST?</strong></p>
+                          <p>In our evaluation using paired spectra from the Alpha II spectrometer and Vertex 70/HTS-XT instruments, SST improved spectral agreement between the two instruments:</p>
+                          <ul>
+                            <li><strong>Spectral RMSE decreased from 0.280 to 0.212</strong>, representing approximately a 24% reduction in spectral differences.</li>
+                            <li><strong>Concordance Correlation Coefficient (CCC) increased from 0.82 to 0.88</strong>, indicating improved spectral agreement.</li>
+                          </ul>
+                          <p>These results demonstrate that SST can reduce instrument-related spectral differences, potentially improving the transferability of KSSL prediction models to Alpha II spectra.</p>
+
+                          <p><strong>Important note: Instrument compatibility</strong></p>
+                          <p><em>The SST transformation was developed using 100 soil samples scanned on one Bruker Alpha II and one Bruker Vertex 70/HTS-XT instrument. It has not yet been independently validated on other Alpha II units or other instrument models. Because individual instruments may have different optical characteristics, transformation performance may vary. Users are encouraged to evaluate prediction accuracy using reference soil samples when applying SST to spectra from a different instrument.</em></p>
                           ")
                    ),
                    tabPanel(
@@ -190,7 +227,7 @@ homePageUI <- function(id) {
                             <h3>Static Models Overview</h3>
                             <p>
                              The static models were developed using the NRCS-KSSL spectral dataset, a database containing analytical data of over 80,000 soil samples and their corresponding MIR spectra.<br>
-                             These models allow you to predict 21 soil properties:
+                             These models allow you to predict 19 soil properties:
                              <div style='display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; font-family: Arimo;'>
                                <ul style='list-style-type: disc; padding-left: 10px;'>
                                <li>Sand</li>
@@ -206,7 +243,7 @@ homePageUI <- function(id) {
                                <li>Total Carbon</li>
                                <li>Estimated Organic Carbon</li>
                                <li>Carbon (hpom)</li>
-                               <li>Carbon (hmin)</li>
+                               <li>Carbon (maom)</li>
                                <li>Total Nitrogen</li>
                                <li>Phosphorus (Olsen)</li>
                                </ul>
@@ -223,9 +260,9 @@ homePageUI <- function(id) {
                                </div>
                                </p>
                             <br>
-                            <h4>Machine Learning Models Used</h4>
+                            <h4>Machine Learning Models</h4>
                             <p>
-                              The static models were developed using five advanced machine-learning techniques:
+                              Static models were developed using five advanced machine-learning techniques.
                             </p>
                             <ul>
                               <li><strong>Partial Least Squares (PLS)</strong> – A robust regression method commonly used for spectral data analysis.</li>
@@ -237,15 +274,14 @@ homePageUI <- function(id) {
                             
                             <p>
                             Background information and examples using these machine learning methods can be found in the <em>References.</em> <br>
-                            Our models are tailored to various soil and environmental conditions, and you can select one of the stratified models: 
-
                             Our models are tailored to various soil and environmental conditions, and you can select one of the stratified models:
                             <ul>
-                            <li><strong>Soil Order </li>
-                            <li>Texture Classes</li>
-                            <li>MLRA (Major Land Resource Areas)</li>
-                            <li>Land Use &amp; Land Cover (LULC)</li>
-                            <li>Sample Depths</li></strong><br>
+                            <li><strong>Soil Order</strong></li>
+                            <li><strong>Texture Classes</strong></li>
+                            <li><strong>MLRA (Major Land Resource Area)</strong></li>
+                            <li><strong>Land Use &amp; Land Cover (LULC)</strong></li>
+                            <li><strong>Sampling Depths</strong></li>
+                            </ul>
                               In addition to these models, we provide <strong>Global Models</strong> trained using the entire NRCS-KSSL dataset, which offers generalized predictions.
                             </p>
                             <br>
@@ -317,7 +353,7 @@ homePageUI <- function(id) {
                             <br>
                             <h4>View and Download Predictions</h4>
                             <p>
-                              Predictions will be displayed at the bottom of the page. Click the Download button to save the predictions and its metadata.
+                              Predictions will be displayed at the bottom of the page. Click the Download button to save the predictions and their metadata.
                             </p>
                             <br>
                             <h4>How to Choose the Right Model</h4>
@@ -331,7 +367,7 @@ homePageUI <- function(id) {
                               </li>
                               <li>
                                 <strong>Check Spectral Compatibility</strong><br>
-                                <em>Spectral Plots</em>: These plots overlay your spectral data with the spectral data from the selected model, allowing visual comparison. <br>
+                                <em>Spectral Plots</em>: These plots overlay your spectral data with the spectral data from the selected model, allowing visual comparison. If the spectra do not align well, consider applying the Spectral Space Transformation (SST) option available in the Preprocessing component to reduce potential instrument-related spectral differences and improve spectral compatibility. This option is primarily intended for spectra collected using a Bruker Alpha II instrument. <br>
                                 <em>PCA Plots</em>: Principal Component Analysis (PCA) Plots compare your data with the dataset used to train the model. If your data points are far from the KSSL data in the PCA plot, consider selecting a different model for better predictions.
                               </li>
                               <li>
@@ -377,7 +413,7 @@ homePageUI <- function(id) {
                               <li><strong>Number of Neighbors: </strong> You can specify the exact number of similar spectra (neighbors) to use in the customization process.</li>
                             </ul>
                             <p>
-                              You can fine-tune the model to better suit your local data and improve the prediction accuracy. For datasets with few samples, we recommend using the Distance-based Selection, but the platform is unable to provide validation metrics for this feature. You can check the model internal calibration metric in the Calibration metric tab. 
+                              You can fine-tune the model to better suit your local data and improve the prediction accuracy. For datasets with few samples, we recommend using the Distance-based Selection, but the platform is unable to provide validation metrics for this feature. You can check the model's internal calibration metric in the Calibration metric tab.
                             </p>
                             <br>
                             <h4>Data Input</h4>
@@ -414,8 +450,8 @@ homePageUI <- function(id) {
                                   <td style='border: 1px solid #ddd; padding: 8px;'>…</td>
                                 </tr>
                                 <tr>
-                                  <td style='border: 1px solid #ddd; padding: 8px;'>400</td>
-                                  <td style='border: 1px solid #ddd; padding: 8px;'>Absorbance at  400 cm<sup>-1</sup></td>
+                                  <td style='border: 1px solid #ddd; padding: 8px;'>600</td>
+                                  <td style='border: 1px solid #ddd; padding: 8px;'>Absorbance at 600 cm<sup>-1</sup></td>
                                 </tr>
                               </tbody>
                             </table>
@@ -449,7 +485,7 @@ homePageUI <- function(id) {
                             <br>
                             <br>
                             <u>How It Works</u> <br>
-                            You can upload your spectral data, specify the response variable (e.g., measured soil property values), and build a machine learning model tailored to your needs. You also have the option to preprocess your spectral data using customizable settings. Visit the Data Preprocessing tab to get started
+                            You can upload your spectral data, specify the response variable (e.g., measured soil property values), and build a machine learning model tailored to your needs. You also have the option to preprocess your spectral data using customizable settings. Visit the Data Preprocessing tab to get started.
                             </p>
                             <br>
                             <h4>Input Data Requirements</h4>
@@ -470,12 +506,12 @@ homePageUI <- function(id) {
                             <ol>
                               <li>
                                 <strong>Upload Your Data</strong><br>
-                                - Ensure your spectral data is preprocessed before uploading.<br>
-                                - Upload a dataset that includes both spectral data and measured soil property values (response variable).
+                                - Ensure that your spectral data is preprocessed before uploading.<br>
+                                - Upload a dataset containing both spectral data and measured soil property values (response variable).
                               </li>
                               <li>
                                 <strong>Specify the Response Variable</strong><br>
-                                - Identify the response variable (the soil property you want to predict) by typing its column name into the web tool.
+                                - Identify the response variable (the soil property you want to predict) by entering its column name into the web tool.
                               </li>
                               <li> 
                               <strong>Choose the data splitting method for calibration and validation.</strong><br>
@@ -499,7 +535,7 @@ homePageUI <- function(id) {
                                 <strong>Dimensionality Reduction (Optional)</strong><br>
                                 - If you choose RF, SVM, or Cubist, you may reduce data dimensions using PCA (Principal Component Analysis).<br>
                                 - <em>Why Use PCA?</em> It enhances training speed and efficiency.<br>
-                                - <em>When NOT to Use PCA:</em> PCA is not recommended for CNN and PLS models. PCA is a built in function in PLS models and PCA can negatively performance of CNN models.<br>
+                                - <em>When NOT to Use PCA:</em> PCA is not recommended for CNN and PLS models, as it negatively impacts their performance.<br>
                                 - <em>How to Apply PCA:</em> If using RF, SVM, or Cubist, check the \"Train with PCA\" box before training.
                               </li>
                               <li>
@@ -529,7 +565,7 @@ homePageUI <- function(id) {
                               If PCA was used during training, click the Use PCA box and upload the .rds PCA model as well. Finally, upload your data file. 
                               This should be in a similar format to the files uploaded in the static models. 
                               Ensure your data file matches the expected format of your model (for example, if your model was trained using data resampled at 50 cm-1, ensure your spectral data matches that). 
-                              Also, ensure you have a Sample ID column at the beginning. Once this is done, click Run Custom Model , and your predictions will appear in the results table to the right. You may download the predictions by clicking the Download Predictions button.
+                              Also, ensure you have a Sample ID column at the beginning.
                               </p>
                             <p>
                               Once this is done, click <em>Run Custom Model</em> and your predictions will appear in the results table to the right. You may download the predictions by clicking the <em>Download Predictions</em> button.
