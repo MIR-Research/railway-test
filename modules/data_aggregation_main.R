@@ -1283,8 +1283,10 @@ dataAggregationServer <- function(id, shared, session) {
     # NULL (with an error message) if the KSSL reference can't be loaded
     sst_kssl_reference <- function() {
       tryCatch(
-        withProgress(message = "Loading KSSL reference spectra...", value = 0.5,
-                     kssl_reference_summary(SST_KSSL_REFERENCE_PROPERTY)),
+        # withProgress(message = "Loading KSSL reference spectra...", value = 0.5,
+        #              kssl_reference_summary(SST_KSSL_REFERENCE_PROPERTY)),
+        # The reference is now a small precomputed file, so it loads instantly
+        kssl_reference_summary(),
         error = function(e) {
           showNotification(paste("Could not load the KSSL reference spectra:", conditionMessage(e)),
                            type = "error")
@@ -1745,18 +1747,29 @@ dataAggregationServer <- function(id, shared, session) {
 # resample -> SNV preprocessed; the same data the Static Models spectral plot
 # uses), loaded through the shared calibration cache (calibration_data.R).
 # Memoised so the SD is computed once per app process; errors aren't cached.
-SST_KSSL_REFERENCE_PROPERTY <- "TC"
-SST_KSSL_REFERENCE_LABEL    <- "Total Carbon"
+# Previously used one property's calibration set (TC), loaded from the bucket:
+# SST_KSSL_REFERENCE_PROPERTY <- "TC"
+# SST_KSSL_REFERENCE_LABEL    <- "Total Carbon"
+#
+# kssl_reference_summary <- memoise::memoise(function(property) {
+#   snv <- load_calibration(property)$snv
+#   if (is.null(snv) || nrow(snv) == 0) stop("no calibration data for ", property)
+#   list(
+#     label = SST_KSSL_REFERENCE_LABEL,
+#     n     = nrow(snv),
+#     mean  = colMeans(snv, na.rm = TRUE),
+#     sd    = apply(snv, 2, sd, na.rm = TRUE)
+#   )
+# })
 
-kssl_reference_summary <- memoise::memoise(function(property) {
-  snv <- load_calibration(property)$snv
-  if (is.null(snv) || nrow(snv) == 0) stop("no calibration data for ", property)
-  list(
-    label = SST_KSSL_REFERENCE_LABEL,
-    n     = nrow(snv),
-    mean  = colMeans(snv, na.rm = TRUE),
-    sd    = apply(snv, 2, sd, na.rm = TRUE)
-  )
+# Now uses the whole KSSL library: the mean and SD at each wavenumber were
+# computed once from KSSL_FUll_preprocessed.csv by
+# model_train/build_kssl_reference.R and saved in data/kssl_reference_full.rds
+# (a few KB, shipped with the app), so nothing large is loaded here.
+SST_KSSL_REFERENCE_FILE <- "data/kssl_reference_full.rds"
+
+kssl_reference_summary <- memoise::memoise(function(property = NULL) {
+  readRDS(SST_KSSL_REFERENCE_FILE)
 })
 
 
