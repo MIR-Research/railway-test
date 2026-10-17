@@ -73,7 +73,7 @@ extraction_methodsServer <- function(id, shared) {
     # (≥ = "greater than or equal" sign, µ = micro sign; written as
     # escapes so this file stays plain ASCII.)
     pom_maom_method <- tagList(
-      tags$p(tags$b("For the pom (POC) and maom (MAOC)")),
+      # tags$p(tags$b("For the pom (POC) and maom (MAOC)")),
       tags$p(paste0(
         "To separate SOC fractions, soil samples were dispersed with a 0.5% sodium ",
         "hexametaphosphate solution, followed by wet sieving to retain the ≥53 µm ",
