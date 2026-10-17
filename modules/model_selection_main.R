@@ -98,11 +98,16 @@ modelSelectionUI <- function(id) {
                   margin-bottom: 0 !important;}"))
   ns <- NS(id)
   fluidPage(
+    # The card used to be capped at 320px with a "fillable" body, which
+    # squeezes its contents to fit: on narrower screens (or with browser
+    # zoom) the labels wrap, and the stratified-model dropdown ended up on
+    # top of Confirm Choices. Now the card grows to fit its contents.
     card(
       min_height = "300px",
-      max_height = "320px",
+      # max_height = "320px",
       card_header("Model Selection"),
       card_body(
+        fillable = FALSE,
         layout_column_wrap(
           width = 1/2,
           verticalLayout(
@@ -144,7 +149,8 @@ modelSelectionUI <- function(id) {
         # Nothing downstream renders until the user confirms their selection.
         actionButton(
           ns("confirm_choices"),
-          "Confirm Choices"
+          "Confirm Choices",
+          width = "100%"   # full width, as before the card body stopped being fillable
         )
       )
     )

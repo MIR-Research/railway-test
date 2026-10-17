@@ -710,7 +710,10 @@ knnServer <- function(id, shared, load_spectral_data_memo) {
           legend.title = element_text(size = 16),  # ← larger title
           legend.text  = element_text(size = 14)   # ← larger labels
         ) +
-        labs(title = "PCA: Calibration / Neighbors / User",
+        # labs(title = "PCA: Calibration / Neighbors / User",
+        # The title names the property, so it's clear the plot follows the
+        # property selection
+        labs(title = paste0("PCA (", input$soilProperty, "): Calibration / Neighbors / User"),
              x = "PC1", y = "PC2")
       
     })
@@ -931,6 +934,22 @@ knnServer <- function(id, shared, load_spectral_data_memo) {
       })
     })
     
+    # Clear the previous results when the property changes, so the metrics,
+    # predictions table and 1:1 plot never show results for a different
+    # property than the one selected (they made it look like the switch
+    # hadn't happened). A job that is still running for the old property
+    # still shows its results when it finishes, as before.
+    observeEvent(input$soilProperty, {
+      if (identical(metaRV$property, input$soilProperty)) return()
+      calibMetrics(data.frame(Metric = character(0), Value = numeric(0),
+                              stringsAsFactors = FALSE))
+      trainPlotData(NULL)
+      shared$preds <- NULL
+      metaRV$metrics <- NULL
+      metaRV$property <- NULL
+      output$pred_table <- DT::renderDataTable(NULL)
+    }, ignoreInit = TRUE)
+
     output$calib_scatter <- renderPlot({
       df <- trainPlotData()
       req(df)

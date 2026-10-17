@@ -455,7 +455,10 @@ ui <- fluidPage(
           # Main content area
           fluidRow(
             layout_column_wrap(
-              height = "300",
+              # height = "300",
+              # At least 300px, but can grow so the Model Selection card
+              # isn't squeezed (see modelSelectionUI)
+              min_height = "300px",
               heights_equal = c("all", "row"),
               fillable = TRUE,
               width = 1/2,
