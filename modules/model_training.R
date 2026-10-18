@@ -456,7 +456,10 @@ byo_train_model <- function(data, train_type, do_pca, var_thresh, train_percent,
                       tuneLength = 10,
                       preProcess = c("center", "scale"))
     
-    svm_pred <- predict(svm_model, newdata = test_data)
+    # svm_pred <- predict(svm_model, newdata = test_data)
+    # Leave out the response column: with it, kernlab's prediction fails and
+    # returns all NAs (empty 1-1 plot). RF/Cubist ignore the extra column.
+    svm_pred <- predict(svm_model, newdata = test_data[, setdiff(names(test_data), res_var), drop = FALSE])
     obs_val <- test_data[[res_var]]
     
     svm_model$pred_obs <- data.frame(
@@ -609,7 +612,9 @@ byo_train_model <- function(data, train_type, do_pca, var_thresh, train_percent,
     test_df_pca <- as.data.frame(X_test_pca)
     test_df_pca[[res_var]] <- Y_test
     
-    svm_pred <- predict(svm_model, newdata = test_df_pca)
+    # svm_pred <- predict(svm_model, newdata = test_df_pca)
+    # Leave out the response column (see train_svm)
+    svm_pred <- predict(svm_model, newdata = test_df_pca[, setdiff(names(test_df_pca), res_var), drop = FALSE])
     obs_val <- test_df_pca[[res_var]]
     svm_model$pred_obs <- data.frame(
       observed  = obs_val,
@@ -1091,6 +1096,8 @@ modelTrainingServer <- function(id, shared, load_spectral_data_memo) {
       # the Train Model button, which stays disabled while it runs.
       train_task <- ExtendedTask$new(start_byo_training)
       bslib::bind_task_button(train_task, "trainModel")
+      # Don't disconnect this session for inactivity while it trains (load_balancer.R)
+      if (exists("lb_register_task")) lb_register_task(session, train_task)
       
       # Settings the running job was started with, so the plots, metadata
       # and download match what was trained even if inputs change meanwhile.
