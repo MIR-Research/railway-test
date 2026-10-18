@@ -551,6 +551,10 @@ ui <- fluidPage(
 
 
 server <- function(input, output, session) {
+  # If this copy of the app is full, send the visitor to the next copy (or
+  # show a busy message) and skip the rest of the server for them
+  # (modules/load_balancer.R; off unless MAX_USERS is set).
+  if (!load_balancer_admit(session)) return(invisible(NULL))
   # Start first so errors/warnings from every other module get logged
   messageLogServer("message_log")
 
