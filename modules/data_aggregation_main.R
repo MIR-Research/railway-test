@@ -756,7 +756,7 @@ dataAggregationServer <- function(id, shared, session) {
       showModal(modalDialog(
         title = "Calibration transfer accuracy",
         p("Spectra must be preprocessed exactly as described (snip 4000–600 cm⁻¹ → ",
-          "SG smoothing, w = 13, p = 2 → 10 cm⁻¹ resampling → SNV)."),
+          "SG smoothing, m = 0, w = 13, p = 2 → 10 cm⁻¹ resampling → SNV)."),
         p("SST reduced the spectral difference between the two instruments from ",
           "RMSE = 0.280 to 0.212, a 24% reduction, and increased spectral agreement ",
           "(CCC) between them from 0.82 to 0.88."),

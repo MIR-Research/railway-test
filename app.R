@@ -388,9 +388,9 @@ ui <- fluidPage(
       # each logo keeps its own margin so the spacing looks
       # the same whenever it’s on screen
       tags$img(src = "logo.png",       class = "logo-brand logo-mir me-4", alt = "MIR Logo"),
-      tags$img(src = "beavs_logo.png", class = "logo-brand logo-osu me-4", alt = "Oregon State University Logo", height = 40),
       tags$img(src = "uw_madison_logo.png",
                class = "logo-brand logo-uw  me-4", height = 40, alt = "University of Wisconsin-Madison Logo"),
+      tags$img(src = "beavs_logo.png", class = "logo-brand logo-osu me-4", alt = "Oregon State University Logo", height = 40),
       
       # USDA mini-block can stay exactly as you had it
       tags$div(

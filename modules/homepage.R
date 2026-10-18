@@ -608,7 +608,7 @@ homePageUI <- function(id) {
           tags$div(
             class = "contact-card",             
             h5("Elliott Demain"),
-            h6("Undergraduate Research Assistant – Oregon State University"),
+            h6("Research Technician - University of Wisconsin-Madison"),
             p( tags$a(href = "mailto:edemain@wisc.edu",
                       "edemain@wisc.edu") )
           ),
@@ -616,7 +616,7 @@ homePageUI <- function(id) {
           tags$div(
             class = "contact-card",
             h5("Malithi Weerasekara"),
-            h6("PhD Student & Research Assistant – Oregon State University"),
+            h6("PhD Student & Research Assistant – University of Wisconsin-Madison"),
             p( tags$a(href = "mailto:weerasekara@wisc.edu",
                       "weerasekara@wisc.edu") )
           ),
@@ -624,7 +624,7 @@ homePageUI <- function(id) {
           tags$div(
             class = "contact-card",
             h5("Dr. Yakun Zhang"),
-            h6("Assistant Professor – Oregon State University"),
+            h6("Assistant Professor – University of Wisconsin-Madison"),
             p( tags$a(href = "mailto:zhang878@wisc.edu",
                       "zhang878@wisc.edu") )
           ),
