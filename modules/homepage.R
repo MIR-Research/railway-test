@@ -96,6 +96,7 @@ homePageUI <- function(id) {
                This option initiates a set of built-in steps designed to meet the requirements of the static prediction models. The following preprocessing steps are automatically applied:
                <li> Data aggregation, Filtering, and Spectral averaging </li>
                <li> Savitzky-Golay Smoothing – Applied using:<br>
+                 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Derivative Order (m) = 0 <br>
                  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Window size (w) = 13 <br>
                  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Polynomial order (p) = 2 
                </li>
