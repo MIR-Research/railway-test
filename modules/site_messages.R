@@ -25,21 +25,26 @@ site_msg_state$last_error <- ""
 
 # The message as stored in the bucket, or NULL if there is none.
 # (A missing file is the normal "no message" case, not an error.)
+# Problems other than "no file" are raised as errors, so refresh_site_message()
+# logs them and the status link (?status) shows them.
 read_site_message <- function() {
-  raw <- tryCatch(
-    aws.s3::get_object(
-      object = site_message_key, bucket = bucket_name(),
-      key = s3_opts()$key, secret = s3_opts()$secret, region = s3_opts()$region,
-      base_url = s3_opts()$base_url, use_https = s3_opts()$use_https,
-      url_style = s3_opts()$url_style, check_region = s3_opts()$check_region
-    ),
-    error = function(e) NULL
-  )
-  # aws.s3 returns an error object (not raw bytes) when the file is missing
-  if (!is.raw(raw) || length(raw) == 0) return(NULL)
+  raw <- suppressWarnings(aws.s3::get_object(
+    object = site_message_key, bucket = bucket_name(),
+    key = s3_opts()$key, secret = s3_opts()$secret, region = s3_opts()$region,
+    base_url = s3_opts()$base_url, use_https = s3_opts()$use_https,
+    url_style = s3_opts()$url_style, check_region = s3_opts()$check_region
+  ))
+  # aws.s3 returns an error object (not raw bytes) when the request failed
+  if (!is.raw(raw)) {
+    code <- tryCatch(as.character(raw$Code), error = function(e) "")
+    if (identical(code, "NoSuchKey")) return(NULL)   # no message set: normal
+    stop("bucket read failed: ", if (length(code) && nzchar(code)) code else "unknown error",
+         tryCatch(paste0(" (", as.character(raw$Message), ")"), error = function(e) ""))
+  }
+  if (length(raw) == 0) return(NULL)
   msg <- tryCatch(jsonlite::fromJSON(rawToChar(raw), simplifyVector = TRUE),
-                  error = function(e) NULL)
-  if (!is.list(msg)) return(NULL)
+                  error = function(e) stop("message file isn't valid JSON: ", conditionMessage(e)))
+  if (!is.list(msg)) stop("message file has an unexpected format")
   msg
 }
 
@@ -53,18 +58,40 @@ site_message_active <- function(msg, now = Sys.time()) {
 }
 
 refresh_site_message <- function() {
+  site_msg_state$last_check <- Sys.time()
+  ok <- TRUE
   msg <- tryCatch(read_site_message(), error = function(e) {
+    ok <<- FALSE
     if (!identical(site_msg_state$last_error, conditionMessage(e))) {
       message("Site message check failed | ", conditionMessage(e))
-      site_msg_state$last_error <- conditionMessage(e)
     }
+    site_msg_state$last_error <- conditionMessage(e)
     NULL
   })
+  if (ok) site_msg_state$last_error <- ""
+  site_msg_state$in_bucket <- msg   # what the file says, even if outside its time window
   new <- if (site_message_active(msg)) msg else NULL
   if (!identical(new$id, site_msg_state$message$id)) {
     message(if (is.null(new)) "Site message: none" else paste("Site message: showing", new$id))
   }
   site_msg_state$message <- new
+}
+
+# For the status link (?status): what this service sees
+site_message_status <- function() {
+  inb <- site_msg_state$in_bucket
+  list(
+    showing     = if (is.null(site_msg_state$message)) "nothing" else site_msg_state$message$id,
+    in_bucket   = if (is.null(inb)) "no message file"
+                  else sprintf("message %s, start %s, end %s", inb$id,
+                               if (nzchar(inb$start_utc %||% "")) paste(inb$start_utc, "UTC") else "now",
+                               if (nzchar(inb$end_utc %||% "")) paste(inb$end_utc, "UTC") else "until cleared"),
+    last_check  = if (is.null(site_msg_state$last_check)) "not yet"
+                  else format(site_msg_state$last_check, "%Y-%m-%d %H:%M:%S UTC", tz = "UTC"),
+    error       = if (nzchar(site_msg_state$last_error)) site_msg_state$last_error else "none",
+    bucket      = bucket_name(),
+    file        = site_message_key
+  )
 }
 
 start_site_message_poller <- function() {

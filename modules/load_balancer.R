@@ -260,7 +260,9 @@ lb_status_self <- function() {
     routing          = if (length(lb_service_urls) > 0) "service list (SERVICE_URLS)"
                        else if (nzchar(lb_next_url)) paste("next service:", lb_next_url)
                        else "none (last service)",
-    url              = if (nzchar(lb_self_url())) lb_self_url() else "unknown"
+    url              = if (nzchar(lb_self_url())) lb_self_url() else "unknown",
+    # What this service sees of the message to users (site_messages.R)
+    site_message     = if (exists("site_message_status")) site_message_status() else "not loaded"
   )
 }
 

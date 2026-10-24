@@ -33,6 +33,9 @@ check_bucket_settings <- function() {
   missing <- vars[!nzchar(Sys.getenv(vars))]
   if (length(missing)) stop("Set these environment variables first (see the top of this file): ",
                             paste(missing, collapse = ", "), call. = FALSE)
+  # Should match the "bucket" the services report at <service URL>/?status
+  message("Using bucket \"", bucket_name(), "\" at ", Sys.getenv("AWS_ENDPOINT_URL"),
+          ", file ", site_message_key)
 }
 
 to_utc <- function(x, tz) {
