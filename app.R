@@ -122,6 +122,8 @@ start_background_trainer()
 # Start loading the error metrics in the background now, so they're ready by
 # the time someone opens the Error Metrics pop-up (error_metrics_main.R)
 refresh_error_metrics()
+# Check the bucket for a message to users once a minute (modules/site_messages.R)
+start_site_message_poller()
 
 # Define soil properties
 soilProperties <- list(
@@ -555,6 +557,8 @@ server <- function(input, output, session) {
   # show a busy message) and skip the rest of the server for them
   # (modules/load_balancer.R; off unless MAX_USERS is set).
   if (!load_balancer_admit(session)) return(invisible(NULL))
+  # Show the current message to users, if one is set (modules/site_messages.R)
+  siteMessageServer(session)
   # Start first so errors/warnings from every other module get logged
   messageLogServer("message_log")
 
@@ -1026,4 +1030,7 @@ server <- function(input, output, session) {
   })
 }
 
-shinyApp(ui = ui, server = server)
+# shinyApp(ui = ui, server = server)
+# load_balancer_ui(): <url>/?status returns the user counts instead of the app
+# (modules/load_balancer.R)
+shinyApp(ui = load_balancer_ui(ui), server = server)
