@@ -49,3 +49,33 @@ start_background_trainer <- function() {
   })
   invisible(background_training_available)
 }
+
+
+# Wraps a training start function (start_knn_training / start_byo_training)
+# for ExtendedTask$new(). If the user's session has ended by the time the
+# background job finishes (tab closed, page reloaded, connection lost), the
+# result is dropped quietly: the task is left unfinished instead of being
+# updated. Without this, Shiny logs "Unhandled promise error: Can't access
+# reactive `ExtendedTask$private$status`; its module session has been
+# destroyed" (harmless, but noise in the logs).
+drop_result_if_session_ended <- function(start_fn, session) {
+  force(start_fn)
+  force(session)
+  never <- function() promises::promise(function(resolve, reject) NULL)
+  function(args) {
+    promises::then(
+      promises::as.promise(start_fn(args)),
+      onFulfilled = function(value) {
+        if (session$isClosed()) {
+          message("Background training finished after its user left; result dropped")
+          return(never())
+        }
+        value
+      },
+      onRejected = function(err) {
+        if (session$isClosed()) return(never())
+        stop(err)
+      }
+    )
+  }
+}

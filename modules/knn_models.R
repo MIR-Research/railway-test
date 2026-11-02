@@ -32,6 +32,69 @@ get_pretrained_pca <- function(prop) {
     }
   )
 }
+# ---- Neighbour selection and training-size limits ----------------------------
+# Training on too many calibration samples ran the deployments out of memory
+# (e.g. SVM's kernel matrix grows with samples squared), and the mid-point
+# default of the old distance slider selected nearly the whole library. So each
+# model type has a maximum number of training samples; a selection over it
+# uses the closest samples up to the limit. Override with the Railway variables
+# KNN_MAX_SAMPLES_RF, _SVM, _CB, _PLS and _CNN.
+knn_env_number <- function(name, default) {
+  value <- suppressWarnings(as.numeric(Sys.getenv(name, "")))
+  if (is.na(value) || value < 1) default else value
+}
+
+knn_sample_limit <- function(model_type) {
+  defaults <- c(rf = 8000, svm = 3000, cb = 15000, pls = 15000, cnn = 10000)
+  knn_env_number(paste0("KNN_MAX_SAMPLES_", toupper(model_type)), defaults[[model_type]])
+}
+
+knn_model_labels <- c(rf = "Random Forest", svm = "SVM", cb = "Cubist",
+                      pls = "PLS", cnn = "CNN")
+
+# For each calibration sample: distance to its nearest uploaded sample, using
+# all principal components. This one list of numbers answers everything distance
+# mode needs (slider range, how many are selected, which are closest), so
+# moving the slider doesn't search again. A calibration sample is within a
+# threshold of some uploaded sample exactly when this distance is within it,
+# so it selects the same samples as comparing every pair, without keeping
+# an uploaded x calibration table of distances in memory.
+knn_nearest_user_dist <- function(calib_scores, user_scores) {
+  as.vector(FNN::get.knnx(data = user_scores, query = calib_scores, k = 1)$nn.dist)
+}
+
+# Slider settings from the sorted distances. Its top end is the distance that
+# reaches the training limit, and it starts at the distance that selects
+# KNN_DEFAULT_SAMPLES samples (default 1000). Rounded up to the slider's 0.01
+# step, so each position includes the sample it is based on.
+knn_slider_settings <- function(sorted_dist, limit) {
+  n <- length(sorted_dist)
+  up <- function(x) ceiling(x * 100) / 100
+  default_samples <- knn_env_number("KNN_DEFAULT_SAMPLES", 1000)
+  lo <- up(sorted_dist[1])
+  hi <- up(sorted_dist[min(limit, n)])
+  if (hi <= lo) hi <- lo + 0.01
+  list(min = lo, max = hi,
+       default = min(hi, up(sorted_dist[min(default_samples, limit, n)])))
+}
+
+# Calibration rows within `threshold`, closest first, up to `limit`
+knn_select_by_distance <- function(nearest_dist, threshold, limit) {
+  closest <- order(nearest_dist)
+  requested <- sum(nearest_dist <= threshold, na.rm = TRUE)
+  list(rows = closest[seq_len(min(requested, limit))], requested = requested, limit = limit)
+}
+
+# The k nearest calibration rows of each uploaded sample (a row can repeat when
+# it's near several samples), keeping the closest entries up to `limit`
+knn_select_by_neighbours <- function(calib_scores, user_scores, k, limit) {
+  nn <- FNN::get.knnx(data = calib_scores, query = user_scores, k = k)
+  rows <- as.vector(nn$nn.index)
+  requested <- length(rows)
+  if (requested > limit) rows <- rows[order(as.vector(nn$nn.dist))[seq_len(limit)]]
+  list(rows = rows, requested = requested, limit = limit)
+}
+
 # ---- Training + prediction (runs in a background process) -------------------
 #
 # Trains the chosen model on the selected calibration neighbours, computes the
@@ -361,7 +424,8 @@ knnUI <- function(id) {
                              choices = c("Distance", "Neighbors"),
                              selected = "Distance",
                              inline = TRUE),
-                uiOutput(ns("knnSliderUI"))%>% withSpinner(type = 1, color = "#3734eb", hide.ui = FALSE)
+                uiOutput(ns("knnSliderUI"))%>% withSpinner(type = 1, color = "#3734eb", hide.ui = FALSE),
+                uiOutput(ns("knnSelectionNote"))
               ), 
               
               selectizeInput(
@@ -497,44 +561,48 @@ knnServer <- function(id, shared, load_spectral_data_memo) {
       req(input$file1, input$soilProperty)
       
       tryCatch({
-        obj <- get_pretrained_pca(input$soilProperty)
-        pca_res        <- obj$pca
-        calib_scores_2d <- obj$calib_scores_2d
-        spec_cols      <- obj$spec_cols
-        
-        # Read user-uploaded data
-        user_df <- tryCatch({
-          read.csv(input$file1$datapath, check.names = FALSE)
-        }, error = function(e) {
-          showNotification(paste("Error reading user CSV file:", e$message), type = "error")
-          return(NULL)
-        })
-        if (is.null(user_df)) return(list(min = 0, max = 10, default = 4))
-        
-        # Same spectral columns as training PCA
-        user_mat <- as.matrix(user_df[, spec_cols, drop = FALSE])
-        user_mat <- matrix(
-          as.numeric(user_mat),
-          nrow = nrow(user_mat),
-          dimnames = list(NULL, spec_cols)
-        )
-        
-        user_scores <- as.data.frame(
-          predict(pca_res, newdata = user_mat)[, 1:2, drop = FALSE]
-        )
-        
-        neighbors <- get.knnx(
-          data  = as.matrix(calib_scores_2d),
-          query = as.matrix(user_scores),
-          k     = nrow(calib_scores_2d)
-        )
-        
-        min_dist    <- round(min(neighbors$nn.dist, na.rm = TRUE), 2)
-        max_dist    <- round(max(neighbors$nn.dist, na.rm = TRUE), 2)
-        default_val <- round((min_dist + max_dist) / 2, 2)
-        
-        list(min = min_dist, max = max_dist, default = default_val)
-        
+        # Old version: range and mid-point default measured on 2 principal
+        # components, while training measured distance on all of them. The
+        # mid-point also selected nearly the whole library.
+        # obj <- get_pretrained_pca(input$soilProperty)
+        # pca_res        <- obj$pca
+        # calib_scores_2d <- obj$calib_scores_2d
+        # spec_cols      <- obj$spec_cols
+        #
+        # # Read user-uploaded data
+        # user_df <- tryCatch({
+        #   read.csv(input$file1$datapath, check.names = FALSE)
+        # }, error = function(e) {
+        #   showNotification(paste("Error reading user CSV file:", e$message), type = "error")
+        #   return(NULL)
+        # })
+        # if (is.null(user_df)) return(list(min = 0, max = 10, default = 4))
+        #
+        # # Same spectral columns as training PCA
+        # user_mat <- as.matrix(user_df[, spec_cols, drop = FALSE])
+        # user_mat <- matrix(
+        #   as.numeric(user_mat),
+        #   nrow = nrow(user_mat),
+        #   dimnames = list(NULL, spec_cols)
+        # )
+        #
+        # user_scores <- as.data.frame(
+        #   predict(pca_res, newdata = user_mat)[, 1:2, drop = FALSE]
+        # )
+        #
+        # neighbors <- get.knnx(
+        #   data  = as.matrix(calib_scores_2d),
+        #   query = as.matrix(user_scores),
+        #   k     = nrow(calib_scores_2d)
+        # )
+        #
+        # min_dist    <- round(min(neighbors$nn.dist, na.rm = TRUE), 2)
+        # max_dist    <- round(max(neighbors$nn.dist, na.rm = TRUE), 2)
+        # default_val <- round((min_dist + max_dist) / 2, 2)
+        #
+        # list(min = min_dist, max = max_dist, default = default_val)
+        knn_slider_settings(sort(nearestDist()), knn_sample_limit(input$modelType))
+
       }, error = function(e) {
         showNotification(paste("Error computing calibration distances:", e$message), type = "error")
         list(min = 0, max = 10, default = 4)
@@ -552,8 +620,32 @@ knnServer <- function(id, shared, load_spectral_data_memo) {
                     value = distances$default, 
                     step = 0.01)
       } else {
-        sliderInput(ns("knnSlider"), "Number of Neighbors", min = 1, max = 10, value = 5)
+        # sliderInput(ns("knnSlider"), "Number of Neighbors", min = 1, max = 10, value = 5)
+        # Neighbors per uploaded sample, capped so that neighbors x uploaded
+        # samples stays within the model's training limit
+        top <- 10L
+        if (!is.null(input$file1) && isTruthy(input$modelType) && !is.null(user_data())) {
+          per_sample <- floor(knn_sample_limit(input$modelType) / nrow(user_data()))
+          top <- as.integer(max(1, min(10, per_sample)))
+        }
+        sliderInput(ns("knnSlider"), "Number of Neighbors", min = 1, max = top, value = min(5L, top))
       }
+    })
+
+    # Under the slider: how many samples the current setting trains on
+    output$knnSelectionNote <- renderUI({
+      sel <- selectedNeighbors()
+      label <- knn_model_labels[[input$modelType]]
+      used <- length(sel$rows)
+      text <- if (sel$requested > sel$limit) {
+        sprintf("This selects %s KSSL samples. The limit for %s is %s, so the closest %s will be used.",
+                format(sel$requested, big.mark = ","), label,
+                format(sel$limit, big.mark = ","), format(used, big.mark = ","))
+      } else {
+        sprintf("This selects %s KSSL samples (limit for %s: %s).",
+                format(used, big.mark = ","), label, format(sel$limit, big.mark = ","))
+      }
+      tags$small(class = "text-muted d-block mb-2", text)
     })
     
     # Reactive to read user-uploaded CSV data with error handling.
@@ -649,12 +741,34 @@ knnServer <- function(id, shared, load_spectral_data_memo) {
       # Project to PCA space (fast)
       user_proj <- predict(pca_res, newdata = user_mat)[, 1:2, drop = FALSE]
       user_scores <- as.data.frame(user_proj)
-      
+
       list(
         pca_res      = pca_res,
         calib_scores = calib_scores_2d,
-        user_scores  = user_scores
+        user_scores  = user_scores,
+        user_full    = predict(pca_res, newdata = user_mat)   # all components
       )
+    })
+
+    # Distance from each calibration sample to its nearest uploaded sample.
+    # Recalculated only when the file or property changes.
+    nearestDist <- reactive({
+      pd <- pcaData()
+      knn_nearest_user_dist(pd$pca_res$x, pd$user_full)
+    })
+
+    # The calibration rows the current settings select. The plot and training
+    # both use this, so the plot shows exactly what gets trained on.
+    selectedNeighbors <- reactive({
+      req(input$knnType, input$knnSlider, input$modelType)
+      limit <- knn_sample_limit(input$modelType)
+      if (input$knnType == "Neighbors") {
+        pd <- pcaData()
+        k <- min(as.integer(input$knnSlider), nrow(pd$pca_res$x))
+        knn_select_by_neighbours(pd$pca_res$x, pd$user_full, k, limit)
+      } else {
+        knn_select_by_distance(nearestDist(), input$knnSlider, limit)
+      }
     })
     
     
@@ -663,32 +777,40 @@ knnServer <- function(id, shared, load_spectral_data_memo) {
       pd <- pcaData()
       validate(need(nrow(pd$calib_scores) > 0, "No calibration scores"))
       
-      if (input$knnType == "Neighbors") {
-        k  <- input$knnSlider
-        nn <- get.knnx(data  = pd$calib_scores,
-                       query = pd$user_scores,
-                       k     = k)
-        unique(as.vector(nn$nn.index))
-        
-      } else {                           # ---- Distance mode ----
-        thresh <- input$knnSlider
-        
-        nn <- get.knnx(
-          data  = pd$calib_scores,
-          query = pd$user_scores,
-          k     = nrow(pd$calib_scores)
-        )
-        
-        ## hits = [user,row] pairs whose distance ≤ threshold
-        idx_mat <- which(nn$nn.dist <= thresh, arr.ind = TRUE)
-        
-        ## If no cells met the threshold, stop 
-        validate(need(nrow(idx_mat) > 0,
-                      "No neighbors within that distance"))
-        
-        ## Second column = column indices (= calibration rows)
-        unique(idx_mat[, 2])
-      }
+      # The plot now highlights the samples training will use. Before, Neighbors
+      # mode searched on 2 components while training used all of them, and
+      # Distance mode highlighted the wrong rows: the block below used a
+      # distance rank as if it were a calibration row number.
+      idx <- unique(selectedNeighbors()$rows)
+      validate(need(length(idx) > 0, "No neighbors within that distance"))
+      idx
+
+      # if (input$knnType == "Neighbors") {
+      #   k  <- input$knnSlider
+      #   nn <- get.knnx(data  = pd$calib_scores,
+      #                  query = pd$user_scores,
+      #                  k     = k)
+      #   unique(as.vector(nn$nn.index))
+      #
+      # } else {                           # ---- Distance mode ----
+      #   thresh <- input$knnSlider
+      #
+        # nn <- get.knnx(
+        #   data  = pd$calib_scores,
+        #   query = pd$user_scores,
+        #   k     = nrow(pd$calib_scores)
+        # )
+        #
+        # ## hits = [user,row] pairs whose distance ≤ threshold
+        # idx_mat <- which(nn$nn.dist <= thresh, arr.ind = TRUE)
+        #
+        # ## If no cells met the threshold, stop
+        # validate(need(nrow(idx_mat) > 0,
+        #               "No neighbors within that distance"))
+        #
+        # ## Second column = column indices (= calibration rows)
+        # unique(idx_mat[, 2])
+      # }
     })
     
     # 3) Render the live PCA + neighbor overlay
@@ -730,8 +852,13 @@ knnServer <- function(id, shared, load_spectral_data_memo) {
 
     # The background job (knn_train_and_predict via start_knn_training).
     # Bound to the Predict button, which stays disabled while it runs.
-    train_task <- ExtendedTask$new(start_knn_training)
+    # train_task <- ExtendedTask$new(start_knn_training)
+    # Drop the result quietly if the user has left by the time it finishes
+    # (background_tasks.R)
+    train_task <- ExtendedTask$new(drop_result_if_session_ended(start_knn_training, session))
     bslib::bind_task_button(train_task, "predict")
+    # Don't disconnect this session for inactivity while it trains (load_balancer.R)
+    if (exists("lb_register_task")) lb_register_task(session, train_task)
 
     # Settings the running job was started with, so the results and the
     # metadata download match what was trained even if the user changes
@@ -784,58 +911,74 @@ knnServer <- function(id, shared, load_spectral_data_memo) {
             dimnames = list(NULL, spec_cols)
           )
           
-          user_pca_scores <- tryCatch({
-            predict(pca_res, newdata = user_matrix)
-          }, error = function(e) {
-            showNotification(paste("Error projecting user data into PCA space:", e$message), type = "error")
-            return(NULL)
-          })
-          
-          calib_pca_scores <- pca_res$x
-          
+          # user_pca_scores <- tryCatch({
+          #   predict(pca_res, newdata = user_matrix)
+          # }, error = function(e) {
+          #   showNotification(paste("Error projecting user data into PCA space:", e$message), type = "error")
+          #   return(NULL)
+          # })
+          #
+          # calib_pca_scores <- pca_res$x
+          #
           incProgress(0.1, detail = "Selecting neighbors...")
-          # Use KNN to select calibration rows.
-          if (input$knnType == "Neighbors") {
-            k <- input$knnSlider
-            neighbors <- tryCatch({
-              get.knnx(data = calib_pca_scores, query = user_pca_scores, k = k)
-            }, error = function(e) {
-              showNotification(paste("Error finding neighbors:", e$message), type = "error")
-              return(NULL)
-            })
-            # Use all neighbor indices (duplicates allowed if same calibration point is selected for multiple user points)
-            all_neighbor_indices <- as.vector(neighbors$nn.index)
-            print(paste("Number of neighbors per user point:", k))
-          } else {
-            neighbors <- tryCatch({
-              get.knnx(data = calib_pca_scores, query = user_pca_scores, k = nrow(calib_pca_scores))
-            }, error = function(e) {
-              showNotification(paste("Error computing distances:", e$message), type = "error")
-              return(NULL)
-            })
-            threshold <- input$knnSlider
-            all_neighbor_indices <- tryCatch({
-              valid_indices <- c()
-              for (user_i in seq_len(nrow(user_pca_scores))) {
-                row_dists <- neighbors$nn.dist[user_i, ]
-                row_idxs  <- neighbors$nn.index[user_i, ]
-                good_cols <- which(row_dists <= threshold)
-                if (length(good_cols) > 0) {
-                  valid_indices <- c(valid_indices, row_idxs[good_cols])
-                }
-              }
-              neighbor_indices <- unique(valid_indices)
-              if (length(neighbor_indices) == 0) {
-                stop("No neighbors selected with the given distance threshold.")
-              }
-              neighbor_indices
-            }, error = function(e) {
-              showNotification(e$message, type = "error")
-              return(NULL)
-            })
-            print(paste("Number of selected neighbors:", length(all_neighbor_indices)))
+          # # Use KNN to select calibration rows.
+          # if (input$knnType == "Neighbors") {
+          #   k <- input$knnSlider
+          #   neighbors <- tryCatch({
+          #     get.knnx(data = calib_pca_scores, query = user_pca_scores, k = k)
+          #   }, error = function(e) {
+          #     showNotification(paste("Error finding neighbors:", e$message), type = "error")
+          #     return(NULL)
+          #   })
+          #   # Use all neighbor indices (duplicates allowed if same calibration point is selected for multiple user points)
+          #   all_neighbor_indices <- as.vector(neighbors$nn.index)
+          #   print(paste("Number of neighbors per user point:", k))
+          # } else {
+          #   neighbors <- tryCatch({
+          #     get.knnx(data = calib_pca_scores, query = user_pca_scores, k = nrow(calib_pca_scores))
+          #   }, error = function(e) {
+          #     showNotification(paste("Error computing distances:", e$message), type = "error")
+          #     return(NULL)
+          #   })
+          #   threshold <- input$knnSlider
+          #   all_neighbor_indices <- tryCatch({
+          #     valid_indices <- c()
+          #     for (user_i in seq_len(nrow(user_pca_scores))) {
+          #       row_dists <- neighbors$nn.dist[user_i, ]
+          #       row_idxs  <- neighbors$nn.index[user_i, ]
+          #       good_cols <- which(row_dists <= threshold)
+          #       if (length(good_cols) > 0) {
+          #         valid_indices <- c(valid_indices, row_idxs[good_cols])
+          #       }
+          #     }
+          #     neighbor_indices <- unique(valid_indices)
+          #     if (length(neighbor_indices) == 0) {
+          #       stop("No neighbors selected with the given distance threshold.")
+          #     }
+          #     neighbor_indices
+          #   }, error = function(e) {
+          #     showNotification(e$message, type = "error")
+          #     return(NULL)
+          #   })
+          #   print(paste("Number of selected neighbors:", length(all_neighbor_indices)))
+          # }
+
+          # Same selection the plot shows, limited to the model's training limit
+          selection <- selectedNeighbors()
+          all_neighbor_indices <- selection$rows
+          if (length(all_neighbor_indices) == 0) {
+            showNotification("No neighbors selected with the given distance threshold.", type = "error")
+            return()
           }
-          
+          if (selection$requested > selection$limit) {
+            showNotification(sprintf(
+              "This setting selects %s samples, over the %s limit of %s. Training on the closest %s.",
+              format(selection$requested, big.mark = ","), knn_model_labels[[input$modelType]],
+              format(selection$limit, big.mark = ","), format(length(all_neighbor_indices), big.mark = ",")),
+              type = "warning")
+          }
+          print(paste("Number of selected neighbors:", length(all_neighbor_indices)))
+
           incProgress(0.1, detail = "Building training data...")
           # Subset calibration data.
           if ("calc_value" %in% colnames(calib_df)) {

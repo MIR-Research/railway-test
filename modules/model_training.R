@@ -1094,7 +1094,10 @@ modelTrainingServer <- function(id, shared, load_spectral_data_memo) {
       ###### 8. Train: prepare here, train in the background ######
       # The background job (byo_train_model via start_byo_training). Bound to
       # the Train Model button, which stays disabled while it runs.
-      train_task <- ExtendedTask$new(start_byo_training)
+      # train_task <- ExtendedTask$new(start_byo_training)
+      # Drop the result quietly if the user has left by the time it finishes
+      # (background_tasks.R)
+      train_task <- ExtendedTask$new(drop_result_if_session_ended(start_byo_training, session))
       bslib::bind_task_button(train_task, "trainModel")
       # Don't disconnect this session for inactivity while it trains (load_balancer.R)
       if (exists("lb_register_task")) lb_register_task(session, train_task)
